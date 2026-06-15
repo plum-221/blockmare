@@ -296,13 +296,38 @@ const matCache={};
 const EXTRA_TEX={leaf:TEX.leaf,cobble:TEX.cobble,deadgrass:TEX.deadgrass,deadleaf:TEX.deadleaf};
 function matFor(id){ if(matCache[id])return matCache[id]; const tex=BLOCKS.find(b=>b.id===id)?.tex||EXTRA_TEX[id]||TEX.dirt; const m=new THREE.MeshLambertMaterial({map:tex}); matCache[id]=m; return m; }
 const NB=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-function buildMeshes(){
+// ===== 区块化增量网格：8×8 列一区块，编辑只重建受影响区块（旧版每次整表重建）=====
+const CS=8;                                  // 区块边长（列）
+const SHARED_GEO=new THREE.BoxGeometry(1,1,1);
+const chunkGroups=new Map();                 // "cx,cz" -> THREE.Group（该区块的逐类型 InstancedMesh）
+let worldTopY=WORLD.maxY;                     // 当前最高方块 y（放块时抬升），区块扫描上界
+const cIdx=v=>Math.floor(v/CS);
+function buildChunk(cx,cz){
+  const key=cx+','+cz; const old=chunkGroups.get(key);
+  if(old){ meshGroup.remove(old); old.children.forEach(m=>m.dispose&&m.dispose()); chunkGroups.delete(key); }
+  const x0=cx*CS, x1=Math.min(WORLD.sx,x0+CS), z0=cz*CS, z1=Math.min(WORLD.sz,z0+CS); const byType={};
+  for(let x=x0;x<x1;x++)for(let z=z0;z<z1;z++)for(let y=0;y<=worldTopY;y++){
+    const id=voxels.get(kkey(x,y,z)); if(!id)continue;
+    let ex=false; for(const [dx,dy,dz] of NB){ if(!voxels.has(kkey(x+dx,y+dy,z+dz))){ex=true;break;} } if(!ex)continue;
+    (byType[id]=byType[id]||[]).push([x,y,z]);
+  }
+  if(!Object.keys(byType).length)return;
+  const grp=new THREE.Group(); const d=new THREE.Object3D();
+  for(const id in byType){ const list=byType[id]; const im=new THREE.InstancedMesh(SHARED_GEO,matFor(id),list.length); list.forEach((p,i)=>{ d.position.set(p[0]+0.5,p[1]+0.5,p[2]+0.5); d.updateMatrix(); im.setMatrixAt(i,d.matrix); }); im.instanceMatrix.needsUpdate=true; grp.add(im); }
+  chunkGroups.set(key,grp); meshGroup.add(grp);
+}
+function buildAllMeshes(){
   if(meshGroup) scene.remove(meshGroup);
-  meshGroup=new THREE.Group(); const byType={};
-  voxels.forEach((id,k)=>{ const [x,y,z]=k.split(',').map(Number); let ex=false; for(const [dx,dy,dz] of NB){ if(!voxels.has(kkey(x+dx,y+dy,z+dz))){ex=true;break;} } if(!ex)return; (byType[id]=byType[id]||[]).push([x,y,z]); });
-  const geo=new THREE.BoxGeometry(1,1,1); const d=new THREE.Object3D();
-  for(const id in byType){ const list=byType[id]; const im=new THREE.InstancedMesh(geo,matFor(id),list.length); list.forEach((p,i)=>{ d.position.set(p[0]+0.5,p[1]+0.5,p[2]+0.5); d.updateMatrix(); im.setMatrixAt(i,d.matrix); }); im.instanceMatrix.needsUpdate=true; meshGroup.add(im); }
+  meshGroup=new THREE.Group(); chunkGroups.clear();
+  worldTopY=WORLD.maxY; voxels.forEach((id,k)=>{ const y=+k.split(',')[1]; if(y>worldTopY)worldTopY=y; });
+  const ncx=Math.ceil(WORLD.sx/CS), ncz=Math.ceil(WORLD.sz/CS);
+  for(let cx=0;cx<ncx;cx++)for(let cz=0;cz<ncz;cz++) buildChunk(cx,cz);
   scene.add(meshGroup);
+}
+// 编辑一个方块后只重建：自身区块 + 跨边界的 x/z 邻居区块（面暴露只沿轴向跨界；y 邻居恒在本区块）
+function dirtyAt(x,z){
+  const cx=cIdx(x),cz=cIdx(z); const set=new Set([cx+','+cz, cIdx(x-1)+','+cz, cIdx(x+1)+','+cz, cx+','+cIdx(z-1), cx+','+cIdx(z+1)]);
+  set.forEach(k=>{ const [a,b]=k.split(',').map(Number); buildChunk(a,b); });
 }
 function raycastVoxel(maxDist=5){
   const o=camera.getWorldPosition(new THREE.Vector3()), dir=camera.getWorldDirection(new THREE.Vector3());
@@ -339,7 +364,7 @@ function updateDig(dt){
     crackMesh.position.set(r.hit[0]+0.5,r.hit[1]+0.5,r.hit[2]+0.5); crackMesh.visible=true;
     if(Math.random()<0.4) sfx.dig(); addNoise(dt*0.5);
     document.getElementById('digWrap').style.display='block'; document.getElementById('digFill').style.width=(digProgress*100)+'%';
-    if(digProgress>=1){ const drop=(id==='cobble')?'stone':(inv.hasOwnProperty(id)&&id!=='torch'&&id!=='food'?id:null); if(drop){ inv[drop]++; updateHUD(); refreshHotbar(); } voxels.delete(k); buildMeshes(); sfx.break(); addNoise(0.5); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
+    if(digProgress>=1){ const drop=(id==='cobble')?'stone':(inv.hasOwnProperty(id)&&id!=='torch'&&id!=='food'?id:null); if(drop){ inv[drop]++; updateHUD(); refreshHotbar(); } voxels.delete(k); dirtyAt(r.hit[0],r.hit[2]); sfx.break(); addNoise(0.5); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
   } else { digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; }
 }
 function placeBlock(){
@@ -349,7 +374,7 @@ function placeBlock(){
   const p=[r.hit[0]+r.face[0],r.hit[1]+r.face[1],r.hit[2]+r.face[2]]; if(voxels.has(kkey(...p)))return;
   const fx=Math.floor(player.pos.x),fz=Math.floor(player.pos.z),fy=Math.floor(player.pos.y);
   if(p[0]===fx&&p[2]===fz&&(p[1]===fy||p[1]===fy+1))return;
-  voxels.set(kkey(...p),id); inv[id]--; buildMeshes(); sfx.place(); refreshHotbar(); addNoise(0.22);
+  voxels.set(kkey(...p),id); inv[id]--; if(p[1]>worldTopY)worldTopY=p[1]; dirtyAt(p[0],p[2]); sfx.place(); refreshHotbar(); addNoise(0.22);
 }
 
 // ---------- 火把 ----------
@@ -645,7 +670,7 @@ function init(){
   hemi=new THREE.HemisphereLight(0x2a3550,0x0a0c10,0.30); scene.add(hemi);
   moon=new THREE.DirectionalLight(0x6a7aa0,0.22); moon.position.set(-20,40,-10); scene.add(moon);
   torchLight=new THREE.PointLight(0xffae42,2.6,16,1.2); scene.add(torchLight);
-  genWorld(); buildMeshes(); initSelection(); entity=buildEntity(); for(let i=0;i<2;i++)phantoms.push(buildPhantom()); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
+  genWorld(); buildAllMeshes(); initSelection(); entity=buildEntity(); for(let i=0;i<2;i++)phantoms.push(buildPhantom()); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
   camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2,0)); updateHUD(); buildHotbar();
   clock=new THREE.Clock(); animate();
@@ -658,7 +683,7 @@ function reset(){
   entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0,seen:0,reappear:0,stepT:0}; entity.visible=false; scareCooldown=0; heartT=0; ambT=6; shakeAmount=0;
   const gl=document.getElementById('glitch'); gl.style.opacity='0'; if(renderer)renderer.domElement.style.filter='none';
   placedTorches.forEach(t=>scene.remove(t.group)); placedTorches.length=0;
-  genWorld(); buildMeshes(); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
+  genWorld(); buildAllMeshes(); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
   setObjective('找齐 4 块灵魂碎片','探索废弃村庄。盯紧阴影。'); updateHUD();
   document.getElementById('deadScreen').style.display='none'; document.getElementById('winScreen').style.display='none'; document.getElementById('scare').style.opacity='0';

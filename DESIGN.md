@@ -61,6 +61,8 @@
 - **音频走程序化合成而非下载素材**：单文件零依赖、即时加载、无版权风险、体积小（GitHub Pages 友好）。
   位置感用 WebAudio PannerNode(HRTF) 实现，真·人声低语用浏览器内置 SpeechSynthesis。
   后续若要更丰富的 dark ambient 底噪，再考虑内联 1–2 个 CC0 ogg loop（base64 或 assets/）。
-- **性能优先**：体素用 InstancedMesh，按方块类型分组；编辑时整表重建（小世界可接受，后续可改增量）。
+- **性能优先**：体素用 InstancedMesh，按方块类型分组。**网格按 8×8 列分区块**，编辑只重建受影响区块
+  （自身 + 跨边界的 x/z 邻区块）；实测较旧版整表重建快 ~64×（19.3ms→0.3ms/次），消除挖放掉帧。
+  正确性以"分区暴露面集合 === 全扫描参考集合"不变量校验（含区块缝）。
 - **素材来源（如将来需要）**：音效 freesound.org / pixabay；纹理 Kenney.nl / Poly Haven(CC0)。
   目录建议：`assets/audio/`、`assets/textures/`，用 fetch/AudioBuffer 加载。当前全程序化，暂不需要。
