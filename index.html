@@ -36,6 +36,27 @@
   #status .k { color:#8a8f7a; font-size:11px; }
   #shardIcon { color:#7fe7c4; } #torchIcon { color:#ffb347; } #foodIcon { color:#e06a6a; }
 
+  /* 底部快捷栏 */
+  #hotbar { position:absolute; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:6px; }
+  .hslot { position:relative; width:50px; height:50px; border:2px solid #3a3f33; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; }
+  .hslot.on { border-color:#e7d9a8; box-shadow:0 0 12px rgba(231,217,168,.4); }
+  .hslot canvas { width:38px; height:38px; image-rendering:pixelated; }
+  .hslot .cnt { position:absolute; right:2px; bottom:0; font-size:12px; color:#fff; text-shadow:0 0 3px #000,0 0 3px #000; }
+  .hslot .num { position:absolute; left:2px; top:0; font-size:10px; color:#8a8f7a; }
+  .hslot.empty canvas { opacity:.28; }
+
+  /* 背包面板 */
+  #backpack { position:absolute; inset:0; z-index:40; display:none; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(5,7,12,.82); pointer-events:auto; }
+  #backpack h2 { color:#e7d9a8; letter-spacing:8px; font-size:22px; margin-bottom:6px; }
+  #backpack .tip { color:#6b7158; font-size:12px; letter-spacing:2px; margin-bottom:26px; }
+  #bagGrid { display:grid; grid-template-columns:repeat(4,96px); gap:14px; }
+  .bslot { width:96px; height:104px; border:1px solid #3a3f33; background:rgba(0,0,0,.5); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:8px; }
+  .bslot canvas { width:48px; height:48px; image-rendering:pixelated; margin-bottom:6px; }
+  .bslot .bn { color:#cdd1bf; font-size:12px; letter-spacing:1px; }
+  .bslot .bc { color:#e7d9a8; font-size:15px; margin-top:2px; }
+  .bslot.zero { opacity:.4; }
+
   #heldTorch { position:absolute; right:38px; bottom:78px; width:120px; height:200px; }
 
   #digWrap { position:absolute; left:50%; top:calc(50% + 28px); transform:translateX(-50%); width:90px; height:8px; background:rgba(0,0,0,.5); border:1px solid #555; display:none; }
@@ -88,7 +109,8 @@
     探索村庄废墟：<b>石碑</b>藏着真相，<b>补给箱</b>给你<span class="o">火把</span>和<span class="r">食物</span>。但废墟也最危险——<b>它</b>常在那游荡。<br>
     <span class="o">火把</span>能逼退它、照亮路；<span class="r">食物</span>填饱肚子（饿了会降速、掉理智）。<br><br>
     <b>WASD</b> 移动 · <b>鼠标</b> 视角 · <b>空格</b> 跳 · <b>Shift</b> 疾跑<br>
-    <b>左键长按</b> 挖方块 · <b>右键</b> 放方块 · <b>R</b> 插火把 · <b>E</b> 互动(开箱/读碑) · <b>Q</b> 吃东西 · <b>1-5</b> 换方块
+    <b>左键长按</b> 挖方块(进背包) · <b>右键</b> 放方块(消耗) · <b>R</b> 插火把 · <b>E</b> 互动 · <b>Q</b> 吃东西<br>
+    <b>1-5/滚轮</b> 选方块 · <b>Tab / B</b> 打开背包(暂停)
   </div>
   <div id="playBtn">进 入 长 夜</div>
   <small>建议戴耳机 · 音量调小</small>
@@ -125,6 +147,8 @@
   </div>
   <div id="lockHint">点击画面 · 锁定鼠标转动视角<br><span style="color:#8a8f7a;font-size:12px;">（WASD 已可移动 · ESC 解锁）</span></div>
   <div id="scare"><img id="scareFace" alt=""></div>
+  <div id="hotbar"></div>
+  <div id="backpack"><h2>背 包</h2><div class="tip">Tab / B 关闭 · 游戏已暂停</div><div id="bagGrid"></div></div>
 </div>
 
 <script src="three.min.js"></script>
@@ -173,8 +197,10 @@ let entity=null, entityState={active:false,dist:999,anger:0,nextWhisper:3,heartb
 const SHARD_TOTAL=4;
 let shards=[], shardsGot=0;
 let altar=null;
-let torchesLeft=10; const placedTorches=[];
-let foodCount=3;
+const placedTorches=[];
+// 统一背包：火把/食物 + 5 种方块（方块成为资源：挖到才有，放置消耗）
+const inv={torch:10, food:3, grass:0, dirt:0, stone:0, plank:0, wood:0};
+let bagOpen=false;
 let chests=[], steles=[], foods=[], villages=[];
 let storiesRead=0;
 
@@ -283,20 +309,22 @@ function updateDig(dt){
     crackMesh.position.set(r.hit[0]+0.5,r.hit[1]+0.5,r.hit[2]+0.5); crackMesh.visible=true;
     if(Math.random()<0.4) sfx.dig();
     document.getElementById('digWrap').style.display='block'; document.getElementById('digFill').style.width=(digProgress*100)+'%';
-    if(digProgress>=1){ voxels.delete(k); buildMeshes(); sfx.break(); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
+    if(digProgress>=1){ const drop=(id==='cobble')?'stone':(inv.hasOwnProperty(id)&&id!=='torch'&&id!=='food'?id:null); if(drop){ inv[drop]++; updateHUD(); refreshHotbar(); } voxels.delete(k); buildMeshes(); sfx.break(); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
   } else { digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; }
 }
 function placeBlock(){
+  const id=BLOCKS[selBlock].id;
+  if(inv[id]<=0){ showSubtitle('没有'+BLOCKS[selBlock].name+'了（挖方块获取）'); return; }
   const r=raycastVoxel(); if(!r)return;
   const p=[r.hit[0]+r.face[0],r.hit[1]+r.face[1],r.hit[2]+r.face[2]]; if(voxels.has(kkey(...p)))return;
   const fx=Math.floor(player.pos.x),fz=Math.floor(player.pos.z),fy=Math.floor(player.pos.y);
   if(p[0]===fx&&p[2]===fz&&(p[1]===fy||p[1]===fy+1))return;
-  voxels.set(kkey(...p),BLOCKS[selBlock].id); buildMeshes(); sfx.place();
+  voxels.set(kkey(...p),id); inv[id]--; buildMeshes(); sfx.place(); refreshHotbar();
 }
 
 // ---------- 火把 ----------
 function placeTorch(){
-  if(torchesLeft<=0){ showSubtitle('没有火把了…'); return; }
+  if(inv.torch<=0){ showSubtitle('没有火把了…'); return; }
   const r=raycastVoxel(); if(!r)return;
   const p=[r.hit[0]+r.face[0],r.hit[1]+r.face[1],r.hit[2]+r.face[2]]; if(voxels.has(kkey(...p)))return;
   const g=new THREE.Group();
@@ -305,7 +333,7 @@ function placeTorch(){
   const L=new THREE.PointLight(0xffae42,2.6,9,1.3); L.position.y=0.7; g.add(L);
   g.position.set(p[0]+0.5,p[1],p[2]+0.5); scene.add(g);
   placedTorches.push({pos:new THREE.Vector3(p[0]+0.5,p[1]+0.7,p[2]+0.5),light:L,flame,group:g});
-  torchesLeft--; updateHUD(); sfx.place();
+  inv.torch--; updateHUD(); refreshHotbar(); sfx.place();
 }
 const TORCH_RADIUS=4.6;
 function inTorchLight(v){ for(const t of placedTorches){ if(t.pos.distanceTo(v)<TORCH_RADIUS)return true; } return false; }
@@ -477,8 +505,8 @@ function spawnFoods(){
 }
 function updateFoods(dt){ const t=performance.now()*0.002;
   for(let i=foods.length-1;i>=0;i--){ const f=foods[i]; f.group.position.y=f.base+0.1+Math.sin(t+i)*0.05; f.group.rotation.y+=dt;
-    if(player.pos.distanceTo(f.group.position.clone().setY(player.pos.y))<1.3 && Math.abs(f.group.position.y-player.pos.y)<2){ scene.remove(f.group); foods.splice(i,1); foodCount++; sfx.pickup(); updateHUD(); showSubtitle('捡到食物 +1'); } } }
-function eat(){ if(foodCount<=0){ showSubtitle('没有食物了'); return; } if(hunger>=100){ showSubtitle('还不饿'); return; } foodCount--; hunger=Math.min(100,hunger+35); sfx.eat(); updateHUD(); }
+    if(player.pos.distanceTo(f.group.position.clone().setY(player.pos.y))<1.3 && Math.abs(f.group.position.y-player.pos.y)<2){ scene.remove(f.group); foods.splice(i,1); inv.food++; sfx.pickup(); updateHUD(); showSubtitle('捡到浆果 +1'); } } }
+function eat(){ if(inv.food<=0){ showSubtitle('没有食物了'); return; } if(hunger>=100){ showSubtitle('还不饿'); return; } inv.food--; hunger=Math.min(100,hunger+35); sfx.eat(); updateHUD(); if(bagOpen)refreshBag(); }
 
 // ---------- 村庄交互物：补给箱 + 石碑 ----------
 function spawnVillageObjects(){
@@ -495,7 +523,7 @@ function nearestInteractable(){ let best=null,bd=2.8;
 function updateInteract(){ const it=nearestInteractable(); const el=document.getElementById('interact');
   if(it){ el.textContent = it.type==='chest'?'[ E ] 打开补给箱':'[ E ] 阅读石碑'; el.style.opacity='1'; } else el.style.opacity='0'; }
 function doInteract(){ const it=nearestInteractable(); if(!it)return;
-  if(it.type==='chest'){ const c=it.obj; c.opened=true; c.lid.rotation.x=-1.1; c.lid.position.z=-0.3; const t=2+Math.floor(Math.random()*3),f=1+Math.floor(Math.random()*2); torchesLeft+=t; foodCount+=f; sfx.chest(); updateHUD(); showSubtitle(`补给：火把 +${t}，食物 +${f}`); }
+  if(it.type==='chest'){ const c=it.obj; c.opened=true; c.lid.rotation.x=-1.1; c.lid.position.z=-0.3; const t=2+Math.floor(Math.random()*3),f=1+Math.floor(Math.random()*2); inv.torch+=t; inv.food+=f; sfx.chest(); updateHUD(); refreshHotbar(); showSubtitle(`补给：火把 +${t}，浆果 +${f}`); }
   else { const s=it.obj; if(!s.read && s.name && s.name!=='序章'){ storiesRead++; showSubtitle(`村民往事 ${storiesRead}/${STORIES.length}`); } showLore((s.name?('— '+s.name+' —\n'):'')+s.text); s.read=true; sfx.lore(); } }
 
 // ---------- 祭坛 ----------
@@ -536,7 +564,7 @@ let subTimer=0, loreTimer=0;
 function showSubtitle(t){ const s=document.getElementById('subtitle'); s.textContent=t; s.style.opacity='1'; subTimer=3; }
 function showLore(t){ const l=document.getElementById('lore'); l.innerHTML=t.replace(/\n/g,'<br>'); l.style.opacity='1'; loreTimer=8; }
 function setObjective(main,sub){ document.getElementById('objective').childNodes[0].nodeValue='目标：'+main; document.getElementById('objSub').textContent=sub||''; }
-function updateHUD(){ document.getElementById('shardCount').textContent=shardsGot+' / '+SHARD_TOTAL; document.getElementById('torchCount').textContent=torchesLeft; document.getElementById('foodCount').textContent=foodCount; }
+function updateHUD(){ document.getElementById('shardCount').textContent=shardsGot+' / '+SHARD_TOTAL; document.getElementById('torchCount').textContent=inv.torch; document.getElementById('foodCount').textContent=inv.food; }
 
 const htCanvas=document.getElementById('heldTorch'), htCtx=htCanvas&&htCanvas.getContext('2d');
 function drawHeldTorch(){ if(!htCtx)return; const W=120; htCtx.clearRect(0,0,W,200);
@@ -557,11 +585,13 @@ function init(){
   torchLight=new THREE.PointLight(0xffae42,2.6,16,1.2); scene.add(torchLight);
   genWorld(); buildMeshes(); initSelection(); entity=buildEntity(); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
-  camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2,0)); updateHUD();
+  camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2,0)); updateHUD(); buildHotbar();
   clock=new THREE.Clock(); animate();
 }
 function reset(){
-  sanity=100; hunger=100; alive=true; won=false; survived=0; shardsGot=0; torchesLeft=10; foodCount=3; storiesRead=0;
+  sanity=100; hunger=100; alive=true; won=false; survived=0; shardsGot=0; storiesRead=0;
+  inv.torch=10; inv.food=3; inv.grass=inv.dirt=inv.stone=inv.plank=inv.wood=0;
+  bagOpen=false; document.getElementById('backpack').style.display='none'; document.body.style.cursor='none'; refreshHotbar();
   entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0,seen:0,reappear:0,stepT:0}; entity.visible=false; scareCooldown=0; heartT=0; ambT=6; shakeAmount=0;
   const gl=document.getElementById('glitch'); gl.style.opacity='0'; if(renderer)renderer.domElement.style.filter='none';
   placedTorches.forEach(t=>scene.remove(t.group)); placedTorches.length=0;
@@ -574,7 +604,7 @@ function reset(){
 
 let firstSpawnTimer=10;
 function animate(){ requestAnimationFrame(animate); const dt=Math.min(0.05,clock.getDelta());
-  if(started&&alive&&!won){ survived+=dt;
+  if(started&&alive&&!won&&!bagOpen){ survived+=dt;
     if(!entityState.active){ firstSpawnTimer-=dt; if(firstSpawnTimer<=0){spawnEntity();showSubtitle('林子里…有什么东西醒了。');} }
     update(dt);
     if(subTimer>0){ subTimer-=dt; if(subTimer<=0)document.getElementById('subtitle').style.opacity='0'; }
@@ -582,11 +612,43 @@ function animate(){ requestAnimationFrame(animate); const dt=Math.min(0.05,clock
   }
   drawHeldTorch(); applyShake(); renderer.render(scene,camera); }
 
-function setSel(i){ selBlock=(i+BLOCKS.length)%BLOCKS.length; showSubtitle('方块：'+BLOCKS[selBlock].name); }
+function setSel(i){ selBlock=(i+BLOCKS.length)%BLOCKS.length; showSubtitle('方块：'+BLOCKS[selBlock].name); refreshHotbar(); }
+
+// ---------- 背包系统 ----------
+function drawItemIcon(cv,id){ const g=cv.getContext('2d'); const S=cv.width; g.clearRect(0,0,S,S);
+  const blk=BLOCKS.find(b=>b.id===id);
+  if(blk){ g.imageSmoothingEnabled=false; g.drawImage(blk.tex.image,0,0,S,S); return; }
+  if(id==='torch'){ g.fillStyle='#6b4a26'; g.fillRect(S*0.45,S*0.4,S*0.1,S*0.55); for(let i=0;i<10;i++){ g.fillStyle=`rgba(255,${160-i*8},40,${0.9-i*0.07})`; const w=(1-i/10)*S*0.4; g.fillRect(S*0.5-w/2,S*0.4-i*S*0.035,w,S*0.05);} return; }
+  if(id==='food'){ g.fillStyle='#c0392b'; g.beginPath(); g.arc(S*0.5,S*0.55,S*0.26,0,7); g.fill(); g.strokeStyle='#3a7a2a'; g.lineWidth=S*0.06; g.beginPath(); g.moveTo(S*0.5,S*0.3); g.lineTo(S*0.62,S*0.16); g.stroke(); return; }
+  if(id==='shard'){ g.fillStyle='#7fe7c4'; g.beginPath(); g.moveTo(S*0.5,S*0.14); g.lineTo(S*0.82,S*0.5); g.lineTo(S*0.5,S*0.86); g.lineTo(S*0.18,S*0.5); g.closePath(); g.fill(); return; }
+}
+function buildHotbar(){ const bar=document.getElementById('hotbar'); if(!bar)return; bar.innerHTML='';
+  BLOCKS.forEach((b,i)=>{ const s=document.createElement('div'); s.className='hslot'; s.dataset.i=i;
+    const cv=document.createElement('canvas'); cv.width=cv.height=32; drawItemIcon(cv,b.id); s.appendChild(cv);
+    const num=document.createElement('div'); num.className='num'; num.textContent=(i+1); s.appendChild(num);
+    const cnt=document.createElement('div'); cnt.className='cnt'; s.appendChild(cnt);
+    s.onclick=()=>{ if(pointerLocked)return; setSel(i); }; bar.appendChild(s); });
+  refreshHotbar();
+}
+function refreshHotbar(){ const bar=document.getElementById('hotbar'); if(!bar||!bar.children.length)return;
+  [...bar.children].forEach((s,i)=>{ const id=BLOCKS[i].id; const c=inv[id]||0; s.classList.toggle('on',i===selBlock); s.classList.toggle('empty',c<=0); s.querySelector('.cnt').textContent=c>0?c:''; }); }
+function refreshBag(){ const grid=document.getElementById('bagGrid'); if(!grid)return; grid.innerHTML='';
+  const order=[['torch','火把'],['food','浆果'],['grass','草方块'],['dirt','泥土'],['stone','石头'],['plank','木板'],['wood','原木'],['shard','灵魂碎片']];
+  order.forEach(([id,name])=>{ const c=(id==='shard')?shardsGot:(inv[id]||0); const s=document.createElement('div'); s.className='bslot'+(c<=0?' zero':'');
+    const cv=document.createElement('canvas'); cv.width=cv.height=48; drawItemIcon(cv,id); s.appendChild(cv);
+    const bn=document.createElement('div'); bn.className='bn'; bn.textContent=name; s.appendChild(bn);
+    const bc=document.createElement('div'); bc.className='bc'; bc.textContent=(id==='shard')?(c+' / '+SHARD_TOTAL):('×'+c); s.appendChild(bc);
+    grid.appendChild(s); }); }
+function toggleBag(){ bagOpen=!bagOpen; const bp=document.getElementById('backpack');
+  if(bagOpen){ refreshBag(); bp.style.display='flex'; document.body.style.cursor='default'; if(document.exitPointerLock)document.exitPointerLock(); mining=false; }
+  else { bp.style.display='none'; document.body.style.cursor='none'; if(started&&alive&&!won)lockPointer(); } }
 
 addEventListener('resize',()=>{ if(!camera)return; camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
 addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.key===' ')keys[' ']=true;
-  if(!started||!pointerLocked)return;
+  if(!started)return;
+  if(e.key==='Tab'||k==='b'){ e.preventDefault(); toggleBag(); return; }
+  if(bagOpen){ if(e.key==='Escape')toggleBag(); return; }
+  if(!pointerLocked)return;
   if(k==='r')placeTorch(); if(k==='e')doInteract(); if(k==='q')eat(); if(k>='1'&&k<='5')setSel(parseInt(k)-1); });
 addEventListener('keyup',e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(e.key===' ')keys[' ']=false; });
 addEventListener('wheel',e=>{ if(!pointerLocked)return; setSel(selBlock+(e.deltaY>0?1:-1)); },{passive:true});
@@ -595,10 +657,10 @@ addEventListener('mousemove',e=>{ if(!pointerLocked)return;
   // 异常尖峰整帧丢弃：人手单帧不可能这么大，几乎一定是指针锁定的抽风数据（会造成瞬间反向甩头）
   if(Math.abs(dx)>200 || Math.abs(dy)>200) return;
   yaw-=dx*0.0022; pitch-=dy*0.0022; pitch=Math.max(-1.5,Math.min(1.5,pitch)); });
-addEventListener('mousedown',e=>{ if(!started)return; if(!pointerLocked){lockPointer();return;} if(e.button===0)mining=true; else if(e.button===2)placeBlock(); });
+addEventListener('mousedown',e=>{ if(!started||bagOpen)return; if(!pointerLocked){lockPointer();return;} if(e.button===0)mining=true; else if(e.button===2)placeBlock(); });
 addEventListener('mouseup',e=>{ if(e.button===0)mining=false; });
 addEventListener('contextmenu',e=>e.preventDefault());
-document.addEventListener('pointerlockchange',()=>{ pointerLocked=document.pointerLockElement===renderer.domElement; mining=false; document.getElementById('lockHint').style.display=(started&&!pointerLocked&&alive&&!won)?'block':'none'; });
+document.addEventListener('pointerlockchange',()=>{ pointerLocked=document.pointerLockElement===renderer.domElement; mining=false; document.getElementById('lockHint').style.display=(started&&!pointerLocked&&alive&&!won&&!bagOpen)?'block':'none'; });
 function lockPointer(){ const el=renderer.domElement;
   try{ const p=el.requestPointerLock({unadjustedMovement:true});   // 原始鼠标数据：绕过系统加速，位移更稳
     if(p&&p.catch) p.catch(()=>{ try{ el.requestPointerLock(); }catch(_){} });   // 不支持则回退普通锁定
