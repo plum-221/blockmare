@@ -120,7 +120,9 @@
     flex-direction:column; align-items:center; justify-content:center; text-align:center; font-size:18px; letter-spacing:3px; padding:24px; }
   #rotateHint .rot { font-size:64px; margin-bottom:18px; animation:rotcue 2s ease-in-out infinite; }
   @keyframes rotcue { 0%,40%{transform:rotate(0)} 60%,100%{transform:rotate(90deg)} }
-  @media (orientation:portrait){ body.touch #rotateHint { display:flex; } }
+  /* 手动横屏：竖持手机时把整个游戏 CSS 旋转 90° 强制横屏（iOS 也生效）*/
+  body.fl { position:fixed; top:0; left:0; width:100vh; height:100vw; overflow:hidden;
+    transform-origin:top left; transform:rotate(90deg) translateY(-100%); }
   /* 矮屏（手机横屏）紧凑化 HUD */
   @media (max-height:480px){
     .barWrap{ width:150px; } #sanityWrap{bottom:64px;} #hungerWrap{bottom:40px;} #noiseWrap{bottom:16px;}
@@ -881,7 +883,8 @@ function toggleBag(){ bagOpen=!bagOpen; const bp=document.getElementById('backpa
   if(bagOpen){ refreshBag(); bp.style.display='flex'; document.body.style.cursor='default'; if(document.exitPointerLock)document.exitPointerLock(); mining=false; }
   else { bp.style.display='none'; document.body.style.cursor='none'; if(started&&alive&&!won)lockPointer(); } }
 
-addEventListener('resize',()=>{ if(!camera)return; camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+addEventListener('resize',()=>{ if(!camera)return; applyOrient(); });
+addEventListener('orientationchange',()=>{ if(camera)setTimeout(applyOrient,80); });
 addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.key===' ')keys[' ']=true;
   if(!started)return;
   if(e.key==='Tab'||k==='b'){ e.preventDefault(); toggleBag(); return; }
@@ -906,19 +909,30 @@ function lockPointer(){ const el=renderer.domElement;
 
 // ===== 触屏控制（手机）：左摇杆移动 · 右半屏拖动转视角 · 按钮组 =====
 const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
-let joyVec={x:0,z:0};
+let joyVec={x:0,z:0}, inputRot=false;
+// 强制横屏时，触摸位移要按 +90° 反旋转补偿（CSS rotate(90deg) 的逆）：view(dx,dy)→local(dy,-dx)
+function rotDelta(dx,dy){ return inputRot ? {x:dy, y:-dx} : {x:dx, y:dy}; }
+function applyOrient(){
+  const portrait = window.innerWidth < window.innerHeight;
+  inputRot = isTouch && portrait;                       // 触屏 + 竖持 → 强制横屏
+  document.body.classList.toggle('fl', inputRot);
+  const w = inputRot ? window.innerHeight : window.innerWidth;
+  const h = inputRot ? window.innerWidth : window.innerHeight;
+  if(camera){ camera.aspect=w/h; camera.updateProjectionMatrix(); }
+  if(renderer) renderer.setSize(w,h);
+}
 function initTouch(){
   if(!isTouch) return; document.body.classList.add('touch');
   const canvas=renderer.domElement;
   // 右半屏（canvas 空白处）拖动转视角
   let lookId=null,lx=0,ly=0;
   canvas.addEventListener('touchstart',e=>{ if(!started||bagOpen||!alive||won)return; const t=e.changedTouches[0]; lookId=t.identifier; lx=t.clientX; ly=t.clientY; },{passive:true});
-  canvas.addEventListener('touchmove',e=>{ for(const t of e.changedTouches){ if(t.identifier===lookId){ yaw-=(t.clientX-lx)*0.005; pitch-=(t.clientY-ly)*0.005; pitch=Math.max(-1.5,Math.min(1.5,pitch)); lx=t.clientX; ly=t.clientY; } } },{passive:true});
+  canvas.addEventListener('touchmove',e=>{ for(const t of e.changedTouches){ if(t.identifier===lookId){ const L=rotDelta(t.clientX-lx, t.clientY-ly); yaw-=L.x*0.005; pitch-=L.y*0.005; pitch=Math.max(-1.5,Math.min(1.5,pitch)); lx=t.clientX; ly=t.clientY; } } },{passive:true});
   const lookEnd=e=>{ for(const t of e.changedTouches) if(t.identifier===lookId)lookId=null; };
   canvas.addEventListener('touchend',lookEnd); canvas.addEventListener('touchcancel',lookEnd);
   // 左下摇杆（带死区）
   const joy=document.getElementById('joy'), knob=document.getElementById('joyKnob'); let joyId=null;
-  const joyMove=t=>{ const r=joy.getBoundingClientRect(),R=r.width/2,cx=r.left+R,cy=r.top+R; let dx=t.clientX-cx,dy=t.clientY-cy; const d=Math.hypot(dx,dy)||1; if(d>R){dx*=R/d;dy*=R/d;} knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; joyVec.x=Math.abs(dx)<R*0.2?0:dx/R; joyVec.z=Math.abs(dy)<R*0.2?0:dy/R; };
+  const joyMove=t=>{ const r=joy.getBoundingClientRect(),R=r.width/2,cx=r.left+R,cy=r.top+R; let dx=t.clientX-cx,dy=t.clientY-cy; const d=Math.hypot(dx,dy)||1; if(d>R){dx*=R/d;dy*=R/d;} const L=rotDelta(dx,dy); knob.style.transform=`translate(calc(-50% + ${L.x}px),calc(-50% + ${L.y}px))`; joyVec.x=Math.abs(L.x)<R*0.2?0:L.x/R; joyVec.z=Math.abs(L.y)<R*0.2?0:L.y/R; };
   joy.addEventListener('touchstart',e=>{ e.preventDefault(); const t=e.changedTouches[0]; joyId=t.identifier; joyMove(t); },{passive:false});
   joy.addEventListener('touchmove',e=>{ e.preventDefault(); for(const t of e.changedTouches) if(t.identifier===joyId)joyMove(t); },{passive:false});
   const joyEnd=e=>{ for(const t of e.changedTouches) if(t.identifier===joyId){ joyId=null; joyVec.x=joyVec.z=0; knob.style.transform='translate(-50%,-50%)'; } };
@@ -930,6 +944,7 @@ function initTouch(){
   hold('btnDig',()=>{mining=true;},()=>{mining=false;});
   tap('btnPlace',()=>placeBlock()); tap('btnUse',()=>doInteract()); tap('btnTorch',()=>placeTorch());
   tap('btnEat',()=>eat()); tap('btnHerb',()=>useHerb());
+  applyOrient();
 }
 function tryLandscape(){ if(!isTouch)return; const el=document.documentElement;
   const lock=()=>{ try{ if(screen.orientation&&screen.orientation.lock)screen.orientation.lock('landscape').catch(()=>{}); }catch(e){} };
