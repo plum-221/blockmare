@@ -346,7 +346,7 @@ function collide(){
 }
 
 const G=26, JUMP=8.0, WALK=4.3, RUN=6.0;
-let yaw=0,pitch=0,stepTimer=0,bob=0;
+let yaw=0,pitch=0,stepTimer=0,bob=0,camBobOffset=0;
 function update(dt){
   if(!alive||won)return;
   camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
@@ -364,7 +364,10 @@ function update(dt){
   player.vel.y=player.vy*dt;
   collide();
   if(player.pos.y<-8){ player.pos.set(WORLD.sx/2,12,WORLD.sz/2); player.vy=0; player.vel.set(0,0,0); }
-  camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2+(moving&&player.onGround?Math.sin(bob)*0.04:0),0));
+  // 平滑头部晃动：朝目标缓动，避免起步/停步/地形交界处的瞬跳
+  const targetBob = (moving ? Math.sin(bob)*0.045 : 0);
+  camBobOffset += (targetBob-camBobOffset)*Math.min(1,dt*12);
+  camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2+camBobOffset,0));
 
   const flick=0.85+Math.random()*0.15; torchLight.intensity=2.6*flick;
   const camDir=camera.getWorldDirection(new THREE.Vector3());
@@ -533,7 +536,11 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.
   if(k==='r')placeTorch(); if(k==='e')doInteract(); if(k==='q')eat(); if(k>='1'&&k<='5')setSel(parseInt(k)-1); });
 addEventListener('keyup',e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(e.key===' ')keys[' ']=false; });
 addEventListener('wheel',e=>{ if(!pointerLocked)return; setSel(selBlock+(e.deltaY>0?1:-1)); },{passive:true});
-addEventListener('mousemove',e=>{ if(!pointerLocked)return; yaw-=e.movementX*0.0022; pitch-=e.movementY*0.0022; pitch=Math.max(-1.5,Math.min(1.5,pitch)); });
+addEventListener('mousemove',e=>{ if(!pointerLocked)return;
+  // 夹住指针锁定偶发的位移尖峰，避免瞬间甩头
+  let dx=e.movementX,dy=e.movementY; const MAX=110;
+  if(dx>MAX)dx=MAX; else if(dx<-MAX)dx=-MAX; if(dy>MAX)dy=MAX; else if(dy<-MAX)dy=-MAX;
+  yaw-=dx*0.0022; pitch-=dy*0.0022; pitch=Math.max(-1.5,Math.min(1.5,pitch)); });
 addEventListener('mousedown',e=>{ if(!started)return; if(!pointerLocked){lockPointer();return;} if(e.button===0)mining=true; else if(e.button===2)placeBlock(); });
 addEventListener('mouseup',e=>{ if(e.button===0)mining=false; });
 addEventListener('contextmenu',e=>e.preventDefault());
