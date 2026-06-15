@@ -82,6 +82,12 @@
   #playBtn,#respawnBtn,#winBtn { pointer-events:auto; cursor:pointer; border:2px solid #6b8e23; background:rgba(107,142,35,.08); color:#cdd1bf; padding:14px 50px; font-family:inherit; font-size:19px; letter-spacing:6px; transition:.25s; }
   #playBtn:hover,#winBtn:hover { background:rgba(107,142,35,.25); box-shadow:0 0 26px rgba(107,142,35,.4); }
   #start small { margin-top:22px; color:#444; letter-spacing:2px; }
+  #bgmBox { margin-top:20px; max-width:580px; font-size:12.5px; color:#9aa089; letter-spacing:1px; line-height:1.7;
+    border:1px solid #2e3326; background:rgba(0,0,0,.32); padding:13px 18px; border-radius:8px; pointer-events:auto; }
+  #bgmBox .t { color:#cdd1bf; letter-spacing:2px; margin-bottom:7px; }
+  #bgmBox a { color:#7fe7c4; } #bgmBox input[type=file] { color:#9aa089; font-family:inherit; font-size:12px; max-width:210px; }
+  #bgmBox .row2 { margin-top:9px; display:flex; align-items:center; gap:10px; justify-content:center; flex-wrap:wrap; }
+  #bgmName { color:#86c46b; }
   .flick { animation:flick 3.5s infinite; }
   @keyframes flick { 0%,97%,100%{opacity:1} 97.5%{opacity:.3} 98%{opacity:1} 98.5%{opacity:.2} }
 
@@ -123,6 +129,17 @@
     <span style="color:#c98a3a">疾跑/挖掘会发出声响引它靠近；潜行(慢走)能甩开它。用方块堆 ≥2 格高的墙挡住它。</span>
   </div>
   <div id="playBtn">进 入 长 夜</div>
+  <div id="bgmBox">
+    <div class="t">🎵 恐怖背景音乐（可选 · 自备，无版权顾虑）</div>
+    游戏自带程序化暗黑氛围；想更吓人，可选一段<b>你自己电脑里的恐怖音乐</b>当循环 BGM：<input type="file" id="bgmFile" accept="audio/*"><br>
+    <span id="bgmName">未选择 —— 不选也能玩，用内置氛围</span>
+    <div class="row2">
+      没有素材？这些站可免费下载无版权恐怖音乐：
+      <a href="https://pixabay.com/zh/music/search/horror/" target="_blank" rel="noopener">↗ Pixabay</a>
+      <a href="https://freesound.org/search/?q=dark+ambient+horror" target="_blank" rel="noopener">↗ Freesound</a>
+      · 音量 <input type="range" id="bgmVol" min="0" max="100" value="55" style="width:120px;vertical-align:middle">
+    </div>
+  </div>
   <small>建议戴耳机 · 音量调小</small>
 </div>
 
@@ -378,7 +395,7 @@ function updateDig(dt){
     if(!crackTexCache[si]) crackTexCache[si]=makeCrackTex(Math.min(0.99,digProgress));
     crackMesh.material.map=crackTexCache[si]; crackMesh.material.needsUpdate=true;
     crackMesh.position.set(r.hit[0]+0.5,r.hit[1]+0.5,r.hit[2]+0.5); crackMesh.visible=true;
-    if(Math.random()<0.4) sfx.dig(); addNoise(dt*0.5);
+    if(Math.random()<0.22) sfx.dig(); addNoise(dt*0.5);
     document.getElementById('digWrap').style.display='block'; document.getElementById('digFill').style.width=(digProgress*100)+'%';
     if(digProgress>=1){ const drop=(id==='cobble')?'stone':(inv.hasOwnProperty(id)&&id!=='torch'&&id!=='food'?id:null); if(drop){ inv[drop]++; updateHUD(); refreshHotbar(); } voxels.delete(k); dirtyAt(r.hit[0],r.hit[2]); sfx.break(); addNoise(0.5); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
   } else { digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; }
@@ -413,7 +430,10 @@ function inTorchLight(v){ for(const t of placedTorches){ if(t.pos.distanceTo(v)<
 const sfx=(()=>{
   let ctx,master,listener;
   let windGain,tensionGain,breathGain,breathPan; let loops=false;
-  function ensure(){ if(ctx)return; ctx=new (window.AudioContext||window.webkitAudioContext)(); master=ctx.createGain(); master.gain.value=0.8; master.connect(ctx.destination); listener=ctx.listener; }
+  function ensure(){ if(ctx)return; ctx=new (window.AudioContext||window.webkitAudioContext)(); master=ctx.createGain(); master.gain.value=0.8;
+    // 总线压缩限幅：把叠在一起的特效黏合、削峰，去掉"乱炸"的杂感
+    const comp=ctx.createDynamicsCompressor(); comp.threshold.value=-20; comp.knee.value=18; comp.ratio.value=4; comp.attack.value=0.004; comp.release.value=0.25;
+    master.connect(comp); comp.connect(ctx.destination); listener=ctx.listener; }
   function noiseBuf(d){ const b=ctx.createBuffer(1,Math.max(1,Math.floor(ctx.sampleRate*d)),ctx.sampleRate); const dt=b.getChannelData(0); for(let i=0;i<dt.length;i++)dt[i]=Math.random()*2-1; return b; }
   function setPan(p,x,y,z){ if(p.positionX){p.positionX.value=x;p.positionY.value=y;p.positionZ.value=z;} else p.setPosition(x,y,z); }
   function mkPan(x,y,z){ const p=ctx.createPanner(); p.panningModel='HRTF'; p.distanceModel='inverse'; p.refDistance=2.5; p.maxDistance=45; p.rolloffFactor=1.1; setPan(p,x,y,z); return p; }
@@ -423,7 +443,16 @@ const sfx=(()=>{
   function toneAt(p,f,d,type,v,gl){ ensure(); const pan=mkPan(p.x,p.y,p.z); pan.connect(master); tone(f,d,type,v,gl,pan); }
   function startAmbient(){ ensure(); if(ctx.state==='suspended')ctx.resume(); if(loops)return; loops=true;
     // 永夜风声（持续，缓慢起伏）
-    const wind=ctx.createBufferSource(); wind.buffer=noiseBuf(4); wind.loop=true; const wf=ctx.createBiquadFilter(); wf.type='lowpass'; wf.frequency.value=420; windGain=ctx.createGain(); windGain.gain.value=0.05; const wl=ctx.createOscillator(); wl.frequency.value=0.05; const wlg=ctx.createGain(); wlg.gain.value=0.028; wl.connect(wlg); wlg.connect(windGain.gain); wind.connect(wf); wf.connect(windGain); windGain.connect(master); wind.start(); wl.start();
+    const wind=ctx.createBufferSource(); wind.buffer=noiseBuf(4); wind.loop=true; const wf=ctx.createBiquadFilter(); wf.type='lowpass'; wf.frequency.value=380; windGain=ctx.createGain(); windGain.gain.value=0.04; const wl=ctx.createOscillator(); wl.frequency.value=0.05; const wlg=ctx.createGain(); wlg.gain.value=0.022; wl.connect(wlg); wlg.connect(windGain.gain); wind.connect(wf); wf.connect(windGain); windGain.connect(master); wind.start(); wl.start();
+    // 暗黑垫 dark-ambient：失谐低频 + 上方不协和小三度 + 次声轰鸣，缓慢蠕动，始终笼罩（恐怖底）
+    const droneG=ctx.createGain(); droneG.gain.value=0.05; const dlp=ctx.createBiquadFilter(); dlp.type='lowpass'; dlp.frequency.value=210;
+    const d1=ctx.createOscillator(); d1.type='sine'; d1.frequency.value=46; const d2=ctx.createOscillator(); d2.type='sine'; d2.frequency.value=46.5; // 失谐拍频
+    const d3=ctx.createOscillator(); d3.type='triangle'; d3.frequency.value=55; const d3g=ctx.createGain(); d3g.gain.value=0.3; // 不协和上层
+    d1.connect(dlp); d2.connect(dlp); d3.connect(d3g); d3g.connect(dlp); dlp.connect(droneG); droneG.connect(master);
+    const dl=ctx.createOscillator(); dl.frequency.value=0.027; const dlg=ctx.createGain(); dlg.gain.value=0.03; dl.connect(dlg); dlg.connect(droneG.gain); // 缓慢起伏
+    d1.start(); d2.start(); d3.start(); dl.start();
+    // 次声轰鸣（极低频噪声脉动，潜意识压迫）
+    const rmb=ctx.createBufferSource(); rmb.buffer=noiseBuf(5); rmb.loop=true; const rf=ctx.createBiquadFilter(); rf.type='lowpass'; rf.frequency.value=70; const rg=ctx.createGain(); rg.gain.value=0.05; const rl=ctx.createOscillator(); rl.frequency.value=0.06; const rlg=ctx.createGain(); rlg.gain.value=0.035; rl.connect(rlg); rlg.connect(rg.gain); rmb.connect(rf); rf.connect(rg); rg.connect(master); rmb.start(); rl.start();
     // 张力低鸣（随实体接近增强；平时为 0）
     const tn=ctx.createOscillator(); tn.type='sawtooth'; tn.frequency.value=44; const tl=ctx.createBiquadFilter(); tl.type='lowpass'; tl.frequency.value=150; tensionGain=ctx.createGain(); tensionGain.gain.value=0; tn.connect(tl); tl.connect(tensionGain); tensionGain.connect(master); tn.start();
     // 实体呼吸（位置音，持续；音量随距离由 setBreath 控制）
@@ -440,12 +469,12 @@ const sfx=(()=>{
   if(typeof speechSynthesis!=='undefined'){ try{ speechSynthesis.onvoiceschanged=pickVoice; pickVoice(); }catch(e){} }
   function speak(text){ try{ if(typeof speechSynthesis==='undefined')return; if(!vReady)pickVoice(); const u=new SpeechSynthesisUtterance(text); if(voice)u.voice=voice; u.lang='zh-CN'; u.rate=0.7; u.pitch=0.25; u.volume=0.4; speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){} }
   return { ensure,startAmbient,setListener,setTension,setBreath,duck,unduck,speak,
-    dig(){noise(0.10,0.14,360);}, break(){noise(0.22,0.3,420);}, place(){tone(180,0.12,'square',0.18);},
-    step(){noise(0.08,0.10,240);}, shard(){tone(700,0.18,'sine',0.25,1200);tone(1050,0.3,'sine',0.18,1500);},
-    pickup(){tone(520,0.12,'sine',0.2,760);}, eat(){noise(0.18,0.12,300);tone(240,0.16,'sine',0.12);},
-    chest(){tone(300,0.1,'square',0.18);setTimeout(()=>tone(440,0.16,'square',0.16),90);}, lore(){tone(360,0.5,'sine',0.12,300);},
-    entStep(pos,v){ noiseAt(pos,0.12,v||0.3,250); }, entWhisper(pos){ noiseAt(pos,0.9,0.12,1400); toneAt(pos,90,0.9,'sine',0.05,70); },
-    cry(pos){ toneAt(pos,430,1.6,'sine',0.05,300); }, creak(pos){ noiseAt(pos,0.5,0.1,180); },
+    dig(){noise(0.09,0.08,300);}, break(){noise(0.20,0.18,360);}, place(){tone(150,0.10,'sine',0.12);},
+    step(){noise(0.06,0.045,170);}, shard(){tone(700,0.18,'sine',0.22,1200);tone(1050,0.3,'sine',0.15,1500);},
+    pickup(){tone(520,0.12,'sine',0.18,760);}, eat(){noise(0.16,0.08,260);tone(240,0.16,'sine',0.1);},
+    chest(){tone(300,0.1,'sine',0.14);setTimeout(()=>tone(440,0.16,'sine',0.12),90);}, lore(){tone(360,0.5,'sine',0.1,300);},
+    entStep(pos,v){ noiseAt(pos,0.12,(v||0.3)*0.7,210); }, entWhisper(pos){ noiseAt(pos,0.9,0.08,1100); toneAt(pos,90,0.9,'sine',0.05,70); },
+    cry(pos){ toneAt(pos,430,1.6,'sine',0.04,300); }, creak(pos){ noiseAt(pos,0.5,0.07,170); },
     heartbeat(v){ tone(54,0.16,'sine',0.2*v,40); setTimeout(()=>tone(50,0.2,'sine',0.15*v,36),170); },
     scare(){ ensure(); noise(1.4,0.6,1800); tone(1200,1.2,'sawtooth',0.4,140); tone(70,1.4,'square',0.5); },
     teleport(){ tone(300,0.25,'sawtooth',0.12,80); }, die(){ tone(140,2.0,'sine',0.4,40); noise(2.0,0.2,500); },
@@ -503,7 +532,7 @@ function update(dt){
   let move=new THREE.Vector3();
   if(keys['w'])move.add(fwd); if(keys['s'])move.sub(fwd); if(keys['d'])move.add(right); if(keys['a'])move.sub(right);
   const moving=move.lengthSq()>0;
-  if(moving){ move.normalize().multiplyScalar(sp*dt); stepTimer-=dt*(canSprint?1.6:1); if(stepTimer<=0){sfx.step();stepTimer=0.42;} bob+=dt*(canSprint?14:9); addNoise(dt*(canSprint?0.9:0.16)); }
+  if(moving){ move.normalize().multiplyScalar(sp*dt); stepTimer-=dt*(canSprint?1.5:1); if(stepTimer<=0){sfx.step();stepTimer=0.52;} bob+=dt*(canSprint?14:9); addNoise(dt*(canSprint?0.9:0.16)); }
   player.vel.x=move.x; player.vel.z=move.z;
   // 竖直：帧率无关
   player.vy-=G*dt; if(player.vy<-55)player.vy=-55;
@@ -533,7 +562,7 @@ function update(dt){
   const sp2 = sanity<45?(45-sanity)/45:0;                                                  // 低理智度
   const hv = Math.max(ep, sp2*0.8);
   heartT-=dt; if(hv>0.06 && heartT<=0){ sfx.heartbeat(hv); heartT=1.0-hv*0.55; }           // 心跳：越近/越疯越快
-  ambT-=dt; if(ambT<=0){ ambT=8+Math.random()*12; const a=Math.random()*6.28,r=10+Math.random()*14; const p=new THREE.Vector3(player.pos.x+Math.cos(a)*r,player.pos.y+Math.random()*3,player.pos.z+Math.sin(a)*r); if(Math.random()<0.5)sfx.creak(p); else sfx.cry(p); } // 远处木头吱嘎/哭声
+  ambT-=dt; if(ambT<=0){ ambT=15+Math.random()*20; const a=Math.random()*6.28,r=10+Math.random()*14; const p=new THREE.Vector3(player.pos.x+Math.cos(a)*r,player.pos.y+Math.random()*3,player.pos.z+Math.sin(a)*r); if(Math.random()<0.5)sfx.creak(p); else sfx.cry(p); } // 远处木头吱嘎/哭声（已稀释，避免杂）
   // 声响衰减 + 诱饵计时 + 幻觉
   noiseLevel=Math.max(0,noiseLevel-dt*0.5); if(lureTimer>0)lureTimer-=dt;
   document.getElementById('noiseFill').style.width=(noiseLevel*100)+'%';
@@ -832,7 +861,13 @@ function lockPointer(){ const el=renderer.domElement;
     if(p&&p.catch) p.catch(()=>{ try{ el.requestPointerLock(); }catch(_){} });   // 不支持则回退普通锁定
   }catch(e){ try{ el.requestPointerLock(); }catch(_){} } }
 
-document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); startQuest(); lockPointer(); document.getElementById('lockHint').style.display='block'; };
+// 自备背景音乐（BYO）：玩家选本地音频当循环 BGM —— 不内嵌任何素材，零版权
+const bgm=new Audio(); bgm.loop=true; bgm.volume=0.55;
+(function(){ const fi=document.getElementById('bgmFile'), nm=document.getElementById('bgmName'), vol=document.getElementById('bgmVol');
+  if(fi) fi.addEventListener('change',e=>{ const f=e.target.files&&e.target.files[0]; if(!f)return; if(bgm.src)URL.revokeObjectURL(bgm.src); bgm.src=URL.createObjectURL(f); bgm.play().catch(()=>{}); nm.textContent='♪ '+f.name+'（已载入 · 进入后循环播放）'; nm.style.color='#7fe7c4'; });
+  if(vol) vol.addEventListener('input',e=>{ bgm.volume=e.target.value/100; });
+})();
+document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); if(bgm.src)bgm.play().catch(()=>{}); startQuest(); lockPointer(); document.getElementById('lockHint').style.display='block'; };
 document.getElementById('respawnBtn').onclick=()=>reset();
 document.getElementById('winBtn').onclick=()=>reset();
 document.getElementById('endBtn').onclick=()=>reset();
