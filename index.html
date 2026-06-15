@@ -537,15 +537,18 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.
 addEventListener('keyup',e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(e.key===' ')keys[' ']=false; });
 addEventListener('wheel',e=>{ if(!pointerLocked)return; setSel(selBlock+(e.deltaY>0?1:-1)); },{passive:true});
 addEventListener('mousemove',e=>{ if(!pointerLocked)return;
-  // 夹住指针锁定偶发的位移尖峰，避免瞬间甩头
-  let dx=e.movementX,dy=e.movementY; const MAX=110;
-  if(dx>MAX)dx=MAX; else if(dx<-MAX)dx=-MAX; if(dy>MAX)dy=MAX; else if(dy<-MAX)dy=-MAX;
+  const dx=e.movementX,dy=e.movementY;
+  // 异常尖峰整帧丢弃：人手单帧不可能这么大，几乎一定是指针锁定的抽风数据（会造成瞬间反向甩头）
+  if(Math.abs(dx)>200 || Math.abs(dy)>200) return;
   yaw-=dx*0.0022; pitch-=dy*0.0022; pitch=Math.max(-1.5,Math.min(1.5,pitch)); });
 addEventListener('mousedown',e=>{ if(!started)return; if(!pointerLocked){lockPointer();return;} if(e.button===0)mining=true; else if(e.button===2)placeBlock(); });
 addEventListener('mouseup',e=>{ if(e.button===0)mining=false; });
 addEventListener('contextmenu',e=>e.preventDefault());
 document.addEventListener('pointerlockchange',()=>{ pointerLocked=document.pointerLockElement===renderer.domElement; mining=false; document.getElementById('lockHint').style.display=(started&&!pointerLocked&&alive&&!won)?'block':'none'; });
-function lockPointer(){ try{ const p=renderer.domElement.requestPointerLock(); if(p&&p.catch)p.catch(()=>{}); }catch(e){} }
+function lockPointer(){ const el=renderer.domElement;
+  try{ const p=el.requestPointerLock({unadjustedMovement:true});   // 原始鼠标数据：绕过系统加速，位移更稳
+    if(p&&p.catch) p.catch(()=>{ try{ el.requestPointerLock(); }catch(_){} });   // 不支持则回退普通锁定
+  }catch(e){ try{ el.requestPointerLock(); }catch(_){} } }
 
 document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); lockPointer(); document.getElementById('lockHint').style.display='block'; };
 document.getElementById('respawnBtn').onclick=()=>reset();
