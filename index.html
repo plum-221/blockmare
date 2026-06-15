@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜行 · BLOCKMARE — 点亮归途</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#000; font-family:'Courier New',monospace; cursor:none; }
+  canvas { display:block; }
+
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:10; }
+  #crosshair { position:absolute; left:50%; top:50%; width:18px; height:18px; transform:translate(-50%,-50%); }
+  #crosshair::before,#crosshair::after { content:''; position:absolute; background:rgba(230,230,230,.8); }
+  #crosshair::before { left:8px; top:0; width:2px; height:18px; }
+  #crosshair::after { top:8px; left:0; height:2px; width:18px; }
+
+  #vignette { position:absolute; inset:0; box-shadow: inset 0 0 200px 70px rgba(0,0,0,.8); transition:box-shadow .6s; }
+
+  /* 顶部目标条 */
+  #objective { position:absolute; left:50%; top:18px; transform:translateX(-50%); text-align:center;
+    color:#e7d9a8; font-size:15px; letter-spacing:2px; text-shadow:0 0 8px #000; }
+  #objSub { color:#9aa089; font-size:12px; margin-top:4px; letter-spacing:1px; }
+
+  /* 左下 理智 */
+  #sanityWrap { position:absolute; left:24px; bottom:24px; width:220px; }
+  #sanityLabel { color:#8a8f7a; font-size:12px; letter-spacing:3px; margin-bottom:6px; text-shadow:0 0 4px #000; }
+  #sanityBar { height:14px; background:rgba(0,0,0,.6); border:1px solid #3a3f33; }
+  #sanityFill { height:100%; width:100%; background:linear-gradient(90deg,#6b8e23,#3a4a14); transition:width .25s, background .4s; }
+
+  /* 右下 状态：碎片 + 火把 */
+  #status { position:absolute; right:24px; bottom:24px; text-align:right; color:#cdd1bf; text-shadow:0 0 6px #000; }
+  #status .row { font-size:15px; letter-spacing:2px; margin-bottom:6px; }
+  #status .k { color:#8a8f7a; font-size:12px; }
+  #shardIcon { color:#7fe7c4; } #torchIcon { color:#ffb347; }
+
+  /* 右下角 手持火把 */
+  #heldTorch { position:absolute; right:38px; bottom:70px; width:120px; height:200px; }
+
+  /* 挖掘进度 */
+  #digWrap { position:absolute; left:50%; top:calc(50% + 28px); transform:translateX(-50%); width:90px; height:8px; background:rgba(0,0,0,.5); border:1px solid #555; display:none; }
+  #digFill { height:100%; width:0%; background:#cdd1bf; }
+
+  #hint { position:absolute; left:50%; top:54px; transform:translateX(-50%); color:#9aa089; font-size:13px; letter-spacing:1px; text-shadow:0 0 6px #000; text-align:center; opacity:.9; }
+  #subtitle { position:absolute; left:50%; bottom:120px; transform:translateX(-50%); color:#cfcfcf; font-size:16px; letter-spacing:2px; text-shadow:0 0 8px #000; font-style:italic; opacity:0; transition:opacity 1s; text-align:center; }
+
+  #scare { position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; display:flex; align-items:center; justify-content:center; }
+  #scareFace { width:min(70vw,520px); }
+
+  #lockHint { display:none; position:absolute; left:50%; top:50%; transform:translate(-50%,40px); color:#e7d9a8; font-size:14px; letter-spacing:2px; text-shadow:0 0 8px #000; text-align:center; }
+
+  .overlay { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; cursor:default; }
+  #start { background:radial-gradient(circle at 50% 38%, #14160f 0%, #000 75%); color:#cdd1bf; }
+  #start h1 { font-size:60px; letter-spacing:14px; margin-bottom:6px; text-shadow:0 0 22px rgba(120,160,60,.5); font-weight:900; }
+  #start h2 { font-size:14px; letter-spacing:8px; color:#6b7158; margin-bottom:30px; }
+  #start .panel { max-width:600px; line-height:1.85; font-size:14px; color:#9aa089; margin-bottom:30px; }
+  #start .panel b { color:#cdd1bf; } #start .panel .g{color:#7fe7c4;} #start .panel .o{color:#ffb347;}
+  #playBtn,#respawnBtn,#winBtn { pointer-events:auto; cursor:pointer; border:2px solid #6b8e23; background:rgba(107,142,35,.08); color:#cdd1bf; padding:14px 50px; font-family:inherit; font-size:19px; letter-spacing:6px; transition:.25s; }
+  #playBtn:hover,#winBtn:hover { background:rgba(107,142,35,.25); box-shadow:0 0 26px rgba(107,142,35,.4); }
+  #start small { margin-top:26px; color:#444; letter-spacing:2px; }
+  .flick { animation:flick 3.5s infinite; }
+  @keyframes flick { 0%,97%,100%{opacity:1} 97.5%{opacity:.3} 98%{opacity:1} 98.5%{opacity:.2} }
+
+  #deadScreen { display:none; background:#000; color:#7a1c1c; }
+  #deadScreen h1 { font-size:50px; letter-spacing:12px; text-shadow:0 0 18px rgba(120,20,20,.6); }
+  #deadScreen p { color:#555; margin-top:14px; letter-spacing:3px; }
+  #respawnBtn { margin-top:30px; border-color:#5a1414; color:#a33; background:rgba(90,20,20,.12); }
+  #respawnBtn:hover { background:rgba(90,20,20,.3); }
+
+  #winScreen { display:none; background:radial-gradient(circle at 50% 40%, #0c1a12 0%, #000 80%); color:#7fe7c4; }
+  #winScreen h1 { font-size:50px; letter-spacing:12px; text-shadow:0 0 22px rgba(80,200,150,.5); }
+  #winScreen p { color:#6b8e23; margin-top:14px; letter-spacing:3px; }
+  #winBtn { margin-top:30px; }
+</style>
+</head>
+<body>
+<div id="start" class="overlay">
+  <h1 class="flick">BLOCKMARE</h1>
+  <h2>点 亮 归 途</h2>
+  <div class="panel">
+    你在一片永远不会天亮的方块森林里醒来。林子里有<b>它</b>——<br>
+    <b>你看着它，它就一动不动；你一转身，它就会逼近。</b><br><br>
+    找齐散落林中的 <span class="g">4 块灵魂碎片</span>，带回出生点的<b>祭坛</b>，点亮它就能逃走。<br>
+    你手里有一支<span class="o">火把</span>——<b>它怕光</b>。把火把插在地上能逼退它、开出安全的路。<br>
+    火把有限，怎么用你自己定：插满路口慢慢躲，还是边跑边插火把杀出去。<br><br>
+    <b>WASD</b> 移动 · <b>鼠标</b> 视角 · <b>空格</b> 跳 · <b>Shift</b> 疾跑<br>
+    <b>左键长按</b> 挖方块（慢慢挖） · <b>右键</b> 放方块 · <b>R</b> 插火把 · <b>1-5/滚轮</b> 换方块
+  </div>
+  <div id="playBtn">进 入 黑 暗</div>
+  <small>建议戴耳机 · 音量调小</small>
+</div>
+
+<div id="deadScreen" class="overlay">
+  <h1>YOU DIED</h1>
+  <p id="deadStat">它找到了你。</p>
+  <div id="respawnBtn">再 来 一 次</div>
+</div>
+
+<div id="winScreen" class="overlay">
+  <h1>YOU ESCAPED</h1>
+  <p id="winStat">你逃出了黑暗的森林。</p>
+  <div id="winBtn">再 玩 一 次</div>
+</div>
+
+<div id="hud">
+  <div id="objective">目标：找齐 4 块灵魂碎片<div id="objSub">它就在林子里。盯紧阴影。</div></div>
+  <div id="hint">左键长按挖方块 · R 插火把照路</div>
+  <div id="subtitle"></div>
+  <div id="crosshair"></div>
+  <div id="digWrap"><div id="digFill"></div></div>
+  <div id="vignette"></div>
+  <canvas id="heldTorch" width="120" height="200"></canvas>
+  <div id="sanityWrap">
+    <div id="sanityLabel">SANITY · 理智</div>
+    <div id="sanityBar"><div id="sanityFill"></div></div>
+  </div>
+  <div id="status">
+    <div class="row"><span id="shardIcon">◆</span> 碎片 <span id="shardCount">0 / 4</span></div>
+    <div class="row"><span id="torchIcon">♨</span> 火把 <span id="torchCount">12</span></div>
+    <div class="k">R 放置 · 它怕光</div>
+  </div>
+  <div id="lockHint">点击画面 · 锁定鼠标转动视角<br><span style="color:#8a8f7a;font-size:12px;">（WASD 已可移动 · ESC 解锁）</span></div>
+  <div id="scare"><img id="scareFace" alt=""></div>
+</div>
+
+<script src="three.min.js"></script>
+<script>
+const THREE_OK = typeof THREE !== 'undefined';
+
+// ---------- noise ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+function vnoise(x,z){
+  const xi=Math.floor(x),zi=Math.floor(z),xf=x-xi,zf=z-zi;
+  const h=(a,b)=>mulberry32(((a*49632+b*325176+11)>>>0))();
+  const s=t=>t*t*(3-2*t), u=s(xf), v=s(zf);
+  const a=h(xi,zi),b=h(xi+1,zi),c=h(xi,zi+1),d=h(xi+1,zi+1);
+  return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v;
+}
+
+// ---------- 程序化贴图 ----------
+function makeTex(drawer){ const c=document.createElement('canvas'); c.width=c.height=16; const g=c.getContext('2d'); drawer(g); const t=new THREE.CanvasTexture(c); t.magFilter=THREE.NearestFilter; t.minFilter=THREE.NearestFilter; return t; }
+function noisePix(g,base,vary){ for(let y=0;y<16;y++)for(let x=0;x<16;x++){ const n=(Math.random()-0.5)*vary; g.fillStyle=`rgb(${base[0]+n|0},${base[1]+n|0},${base[2]+n|0})`; g.fillRect(x,y,1,1);} }
+const TEX = {
+  grass: makeTex(g=>noisePix(g,[64,104,42],28)),
+  dirt:  makeTex(g=>noisePix(g,[88,64,42],26)),
+  stone: makeTex(g=>noisePix(g,[92,94,98],24)),
+  wood:  makeTex(g=>{ noisePix(g,[80,60,34],16); for(let y=0;y<16;y++){g.fillStyle='rgba(40,28,14,.5)';g.fillRect(3,y,1,1);g.fillRect(11,y,1,1);} }),
+  leaf:  makeTex(g=>noisePix(g,[34,64,30],36)),
+  plank: makeTex(g=>{ noisePix(g,[140,100,56],14); for(let y=0;y<16;y+=4){g.fillStyle='rgba(50,34,16,.6)';g.fillRect(0,y,16,1);} }),
+};
+const BLOCKS = [
+  {id:'grass', tex:TEX.grass, name:'草方块', hard:0.7},
+  {id:'dirt',  tex:TEX.dirt,  name:'泥土',   hard:0.7},
+  {id:'stone', tex:TEX.stone, name:'石头',   hard:2.2},
+  {id:'plank', tex:TEX.plank, name:'木板',   hard:1.0},
+  {id:'wood',  tex:TEX.wood,  name:'原木',   hard:1.4},
+];
+const HARD = {grass:0.7,dirt:0.7,stone:2.2,plank:1.0,wood:1.4,leaf:0.3};
+
+// ---------- 裂纹贴图（10 级） ----------
+function makeCrackTex(stage){ // 0..1
+  const c=document.createElement('canvas'); c.width=c.height=16; const g=c.getContext('2d');
+  g.clearRect(0,0,16,16); g.strokeStyle='rgba(0,0,0,.85)'; g.lineWidth=1;
+  const n=Math.floor(stage*9);
+  const r=mulberry32(77);
+  for(let i=0;i<n;i++){ const x=r()*16,y=r()*16; g.beginPath(); g.moveTo(x,y); g.lineTo(x+(r()-0.5)*8,y+(r()-0.5)*8); g.stroke(); }
+  const t=new THREE.CanvasTexture(c); t.magFilter=THREE.NearestFilter; t.minFilter=THREE.NearestFilter; return t;
+}
+
+// ============================================================
+let scene,camera,renderer,clock;
+let ambient,hemi,moon,torchLight;
+const WORLD = { sx:48, sz:48, maxY:9 };
+const voxels = new Map();
+const kkey=(x,y,z)=>x+','+y+','+z;
+let meshGroup;
+const player = { pos:new THREE.Vector3(), vel:new THREE.Vector3(), onGround:false, height:1.7, radius:0.3 };
+let sanity=100, alive=true, won=false, survived=0;
+let selBlock=0; const keys={};
+let started=false, pointerLocked=false;
+let entity=null, entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0};
+
+const SHARD_TOTAL=4;
+let shards=[], shardsGot=0;
+let altar=null, altarLit=false;
+let torchesLeft=12; const placedTorches=[];
+
+// ---------- 世界生成 ----------
+function genWorld(){
+  voxels.clear();
+  for(let x=0;x<WORLD.sx;x++)for(let z=0;z<WORLD.sz;z++){
+    const e=vnoise(x*0.10,z*0.10)+vnoise(x*0.22,z*0.22)*0.5;
+    let h=Math.floor(2+e*4); if(h<1)h=1; if(h>WORLD.maxY)h=WORLD.maxY;
+    for(let y=0;y<=h;y++){ let id='stone'; if(y===h)id='grass'; else if(y>=h-2)id='dirt'; voxels.set(kkey(x,y,z),id); }
+    if(Math.random()<0.020 && h>=2){
+      const ty=h; for(let t=1;t<=4;t++) voxels.set(kkey(x,ty+t,z),'wood');
+      for(let lx=-2;lx<=2;lx++)for(let lz=-2;lz<=2;lz++)for(let ly=3;ly<=5;ly++){
+        if(Math.abs(lx)+Math.abs(lz)+Math.abs(ly-4)>4) continue;
+        const kx=x+lx,kz=z+lz,ky=ty+ly; if(kx<0||kz<0||kx>=WORLD.sx||kz>=WORLD.sz)continue;
+        if(!voxels.has(kkey(kx,ky,kz))) voxels.set(kkey(kx,ky,kz),'leaf');
+      }
+    }
+  }
+}
+function groundHeight(x,z){ const xi=Math.floor(x),zi=Math.floor(z); for(let y=WORLD.maxY+6;y>=0;y--) if(voxels.has(kkey(xi,y,zi))) return y+1; return 1; }
+
+// ---------- mesh ----------
+const matCache={};
+function matFor(id){ if(matCache[id])return matCache[id]; const tex=BLOCKS.find(b=>b.id===id)?.tex||(id==='leaf'?TEX.leaf:TEX.dirt); const m=new THREE.MeshLambertMaterial({map:tex}); matCache[id]=m; return m; }
+const NB=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+function buildMeshes(){
+  if(meshGroup){ scene.remove(meshGroup); }
+  meshGroup=new THREE.Group(); const byType={};
+  voxels.forEach((id,k)=>{ const [x,y,z]=k.split(',').map(Number); let ex=false; for(const [dx,dy,dz] of NB){ if(!voxels.has(kkey(x+dx,y+dy,z+dz))){ex=true;break;} } if(!ex)return; (byType[id]=byType[id]||[]).push([x,y,z]); });
+  const geo=new THREE.BoxGeometry(1,1,1); const d=new THREE.Object3D();
+  for(const id in byType){ const list=byType[id]; const im=new THREE.InstancedMesh(geo,matFor(id),list.length); list.forEach((p,i)=>{ d.position.set(p[0]+0.5,p[1]+0.5,p[2]+0.5); d.updateMatrix(); im.setMatrixAt(i,d.matrix); }); im.instanceMatrix.needsUpdate=true; meshGroup.add(im); }
+  scene.add(meshGroup);
+}
+
+// ---------- DDA ----------
+function raycastVoxel(maxDist=5){
+  const o=camera.getWorldPosition(new THREE.Vector3()), dir=camera.getWorldDirection(new THREE.Vector3());
+  let x=Math.floor(o.x),y=Math.floor(o.y),z=Math.floor(o.z);
+  const sx=Math.sign(dir.x),sy=Math.sign(dir.y),sz=Math.sign(dir.z);
+  const tDX=Math.abs(1/dir.x),tDY=Math.abs(1/dir.y),tDZ=Math.abs(1/dir.z);
+  let tMX=(dir.x>0?(x+1-o.x):(o.x-x))*tDX, tMY=(dir.y>0?(y+1-o.y):(o.y-y))*tDY, tMZ=(dir.z>0?(z+1-o.z):(o.z-z))*tDZ;
+  let face=[0,0,0],t=0;
+  for(let i=0;i<80;i++){ if(voxels.has(kkey(x,y,z))) return {hit:[x,y,z],face};
+    if(tMX<tMY&&tMX<tMZ){x+=sx;t=tMX;tMX+=tDX;face=[-sx,0,0];}
+    else if(tMY<tMZ){y+=sy;t=tMY;tMY+=tDY;face=[0,-sy,0];}
+    else {z+=sz;t=tMZ;tMZ+=tDZ;face=[0,0,-sz];}
+    if(t>maxDist)break; }
+  return null;
+}
+
+// ---------- 选择高亮 + 挖掘 ----------
+let selBox, crackMesh, crackTexCache={};
+function initSelection(){
+  const eg=new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002,1.002,1.002));
+  selBox=new THREE.LineSegments(eg,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.5})); selBox.visible=false; scene.add(selBox);
+  crackMesh=new THREE.Mesh(new THREE.BoxGeometry(1.01,1.01,1.01), new THREE.MeshBasicMaterial({transparent:true,opacity:0.9,depthWrite:false})); crackMesh.visible=false; scene.add(crackMesh);
+}
+let digTarget=null, digProgress=0, mining=false;
+function updateDig(dt){
+  const r=raycastVoxel();
+  if(r){ selBox.position.set(r.hit[0]+0.5,r.hit[1]+0.5,r.hit[2]+0.5); selBox.visible=true; }
+  else { selBox.visible=false; }
+  if(mining && r && r.hit[1]>0){
+    const k=kkey(...r.hit); const id=voxels.get(k); const hard=HARD[id]||1;
+    if(!digTarget || digTarget!==k){ digTarget=k; digProgress=0; }
+    digProgress += dt/hard;
+    // 裂纹
+    const stage=Math.min(0.99,digProgress);
+    const si=Math.floor(stage*9);
+    if(!crackTexCache[si]) crackTexCache[si]=makeCrackTex(stage);
+    crackMesh.material.map=crackTexCache[si]; crackMesh.material.needsUpdate=true;
+    crackMesh.position.set(r.hit[0]+0.5,r.hit[1]+0.5,r.hit[2]+0.5); crackMesh.visible=true;
+    if(Math.random()<0.4) sfx.dig();
+    document.getElementById('digWrap').style.display='block';
+    document.getElementById('digFill').style.width=(digProgress*100)+'%';
+    if(digProgress>=1){ voxels.delete(k); buildMeshes(); sfx.break(); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
+  } else {
+    digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none';
+  }
+}
+function placeBlock(){
+  const r=raycastVoxel(); if(!r)return;
+  const p=[r.hit[0]+r.face[0],r.hit[1]+r.face[1],r.hit[2]+r.face[2]];
+  if(voxels.has(kkey(...p)))return;
+  const fx=Math.floor(player.pos.x),fz=Math.floor(player.pos.z),fy=Math.floor(player.pos.y);
+  if(p[0]===fx&&p[2]===fz&&(p[1]===fy||p[1]===fy+1))return;
+  voxels.set(kkey(...p),BLOCKS[selBlock].id); buildMeshes(); sfx.place();
+}
+
+// ---------- 火把（手持 + 放置） ----------
+function placeTorch(){
+  if(torchesLeft<=0){ showSubtitle('没有火把了…'); return; }
+  const r=raycastVoxel(); if(!r)return;
+  const p=[r.hit[0]+r.face[0],r.hit[1]+r.face[1],r.hit[2]+r.face[2]];
+  if(voxels.has(kkey(...p)))return;
+  const g=new THREE.Group();
+  const stick=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.5,0.1),new THREE.MeshLambertMaterial({color:0x6b4a26})); stick.position.y=0.25; g.add(stick);
+  const flame=new THREE.Mesh(new THREE.BoxGeometry(0.18,0.22,0.18),new THREE.MeshBasicMaterial({color:0xffb347})); flame.position.y=0.6; g.add(flame);
+  const L=new THREE.PointLight(0xffae42,2.6,9,1.3); L.position.y=0.7; g.add(L);
+  g.position.set(p[0]+0.5,p[1],p[2]+0.5); scene.add(g);
+  placedTorches.push({pos:new THREE.Vector3(p[0]+0.5,p[1]+0.7,p[2]+0.5),light:L,flame,group:g});
+  torchesLeft--; updateHUD(); sfx.place();
+}
+const TORCH_RADIUS=4.6;
+function inTorchLight(v){ // v: Vector3
+  for(const t of placedTorches){ if(t.pos.distanceTo(v)<TORCH_RADIUS) return true; }
+  return false;
+}
+
+// ============================================================
+//  音效
+// ============================================================
+const sfx=(()=>{
+  let ctx,master,drone,droneGain;
+  function ensure(){ if(!ctx){ctx=new (window.AudioContext||window.webkitAudioContext)();master=ctx.createGain();master.gain.value=0.7;master.connect(ctx.destination);} }
+  function startAmbient(){ ensure();
+    drone=ctx.createOscillator();drone.type='sawtooth';drone.frequency.value=42;
+    const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=120;
+    droneGain=ctx.createGain();droneGain.gain.value=0.05;
+    const lfo=ctx.createOscillator();lfo.frequency.value=0.07;const lg=ctx.createGain();lg.gain.value=8;lfo.connect(lg);lg.connect(drone.frequency);
+    drone.connect(lp);lp.connect(droneGain);droneGain.connect(master);drone.start();lfo.start(); }
+  function tone(f,d,type='sine',v=0.3,gl){ ensure();const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.value=f;if(gl)o.frequency.exponentialRampToValueAtTime(gl,ctx.currentTime+d);g.gain.value=v;g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d);o.connect(g);g.connect(master);o.start();o.stop(ctx.currentTime+d); }
+  function noise(d,v,ff){ ensure();const n=ctx.createBufferSource(),buf=ctx.createBuffer(1,ctx.sampleRate*d,ctx.sampleRate),dt=buf.getChannelData(0);for(let i=0;i<dt.length;i++)dt[i]=Math.random()*2-1;n.buffer=buf;const f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=ff||800;const g=ctx.createGain();g.gain.value=v;g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d);n.connect(f);f.connect(g);g.connect(master);n.start();n.stop(ctx.currentTime+d); }
+  return { ensure,startAmbient,
+    dig(){noise(0.10,0.14,360);}, break(){noise(0.22,0.3,420);}, place(){tone(180,0.12,'square',0.18);},
+    step(){noise(0.08,0.10,240);}, shard(){tone(700,0.18,'sine',0.25,1200);tone(1050,0.3,'sine',0.18,1500);},
+    whisper(){noise(0.9,0.10,1400);tone(90,0.9,'sine',0.04,70);},
+    heartbeat(v){tone(54,0.16,'sine',0.18*v,40);setTimeout(()=>tone(50,0.2,'sine',0.14*v,36),180);},
+    scare(){ensure();noise(1.4,0.6,1800);tone(1200,1.2,'sawtooth',0.4,140);tone(70,1.4,'square',0.5);},
+    teleport(){tone(300,0.25,'sawtooth',0.12,80);}, die(){tone(140,2.0,'sine',0.4,40);noise(2.0,0.2,500);},
+    win(){tone(523,0.3,'sine',0.3);setTimeout(()=>tone(659,0.3,'sine',0.3),200);setTimeout(()=>tone(784,0.5,'sine',0.3),400);},
+  };
+})();
+
+// ============================================================
+//  实体
+// ============================================================
+function makeEntityFaceDataURL(){
+  const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d');
+  g.fillStyle='#1a1208';g.fillRect(0,0,256,256);
+  for(let i=0;i<6000;i++){g.fillStyle=`rgba(${30+Math.random()*40|0},${20+Math.random()*30|0},10,0.4)`;g.fillRect(Math.random()*256,Math.random()*256,2,2);}
+  g.fillStyle='#eaffea';g.shadowColor='#bfffbf';g.shadowBlur=40;g.fillRect(56,96,48,34);g.fillRect(152,96,48,34);
+  g.shadowBlur=0;g.fillStyle='#000';g.fillRect(86,180,84,10);
+  for(let x=90;x<170;x+=12){g.fillStyle='#3a2a1a';g.fillRect(x,180,4,16);}
+  return c.toDataURL();
+}
+function buildEntity(){
+  const g=new THREE.Group();
+  const skin=new THREE.MeshLambertMaterial({color:0x191915});
+  const box=(w,h,d,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),skin);m.position.set(x,y,z);g.add(m);return m;};
+  box(0.55,0.55,0.55,0,1.78,0); box(0.55,0.75,0.28,0,1.15,0);
+  box(0.22,0.75,0.22,-0.38,1.15,0); box(0.22,0.75,0.22,0.38,1.15,0);
+  box(0.24,0.75,0.24,-0.16,0.40,0); box(0.24,0.75,0.24,0.16,0.40,0);
+  const eyeMat=new THREE.MeshBasicMaterial({color:0xeaffea});
+  const e1=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.08,0.05),eyeMat);e1.position.set(-0.13,1.82,0.28);g.add(e1);
+  const e2=e1.clone();e2.position.x=0.13;g.add(e2);
+  const light=new THREE.PointLight(0x88ff88,0,4);light.position.set(0,1.8,0.3);g.add(light);
+  g.userData.eyeLight=light; g.visible=false; scene.add(g); return g;
+}
+function spawnEntity(){
+  const ang=Math.random()*Math.PI*2, r=17+Math.random()*7;
+  const ex=player.pos.x+Math.cos(ang)*r, ez=player.pos.z+Math.sin(ang)*r;
+  entity.position.set(ex,groundHeight(ex,ez),ez); entity.visible=true;
+  entityState.active=true; entityState.anger=0.4;
+}
+function lookingAtEntity(){
+  if(!entity.visible)return false;
+  const cam=camera.getWorldPosition(new THREE.Vector3());
+  const toE=entity.position.clone().add(new THREE.Vector3(0,1.4,0)).sub(cam);
+  const dist=toE.length(); toE.normalize();
+  const dir=camera.getWorldDirection(new THREE.Vector3());
+  if(dir.dot(toE)<0.55)return false;
+  const steps=Math.min(40,Math.floor(dist));
+  for(let i=2;i<steps;i++){ const p=cam.clone().add(dir.clone().multiplyScalar(i*(dist/steps))); if(voxels.has(kkey(Math.floor(p.x),Math.floor(p.y),Math.floor(p.z))))return false; }
+  return true;
+}
+
+// ============================================================
+//  物理
+// ============================================================
+function collide(){
+  const r=player.radius,h=player.height;
+  const blocked=(nx,ny,nz)=>{ const x0=Math.floor(nx-r),x1=Math.floor(nx+r),z0=Math.floor(nz-r),z1=Math.floor(nz+r),y0=Math.floor(ny),y1=Math.floor(ny+h-0.01);
+    for(let x=x0;x<=x1;x++)for(let z=z0;z<=z1;z++)for(let y=y0;y<=y1;y++) if(voxels.has(kkey(x,y,z)))return true; return false; };
+  let ny=player.pos.y+player.vel.y;
+  if(!blocked(player.pos.x,ny,player.pos.z)){player.pos.y=ny;player.onGround=false;} else {if(player.vel.y<0)player.onGround=true;player.vel.y=0;}
+  let nx=player.pos.x+player.vel.x; if(!blocked(nx,player.pos.y,player.pos.z))player.pos.x=nx; else player.vel.x=0;
+  let nz=player.pos.z+player.vel.z; if(!blocked(player.pos.x,player.pos.y,nz))player.pos.z=nz; else player.vel.z=0;
+}
+
+let yaw=0,pitch=0,stepTimer=0,bob=0;
+function update(dt){
+  if(!alive||won)return;
+  camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
+  const speed=(keys['shift']?5.4:3.0)*dt;
+  const fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw)), right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  let move=new THREE.Vector3();
+  if(keys['w'])move.add(fwd); if(keys['s'])move.sub(fwd); if(keys['d'])move.add(right); if(keys['a'])move.sub(right);
+  let moving=move.lengthSq()>0;
+  if(moving){ move.normalize().multiplyScalar(speed); stepTimer-=dt*(keys['shift']?1.6:1); if(stepTimer<=0){sfx.step();stepTimer=0.42;} bob+=dt*(keys['shift']?14:9); }
+  player.vel.x=move.x; player.vel.z=move.z;
+  player.vel.y-=9.8*dt*dt*2.2; if(player.vel.y<-0.5)player.vel.y=-0.5;
+  if(keys[' ']&&player.onGround){player.vel.y=0.16;player.onGround=false;}
+  collide();
+  if(player.pos.y<-8){ player.pos.set(WORLD.sx/2,12,WORLD.sz/2); player.vel.set(0,0,0); }
+  camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2+(moving?Math.sin(bob)*0.04:0),0));
+
+  // 手持火把光：温暖、跟随、轻微闪烁
+  const flick=0.85+Math.random()*0.15;
+  torchLight.intensity=2.6*flick;
+  const camDir=camera.getWorldDirection(new THREE.Vector3());
+  torchLight.position.copy(camera.position).add(camDir.clone().multiplyScalar(0.6)).add(new THREE.Vector3(0,-0.2,0));
+
+  updateDig(dt);
+  updateEntity(dt);
+  updateShards(dt);
+  updateAltar(dt);
+  updateSanity(dt);
+  // 放置火把的火苗闪烁
+  for(const t of placedTorches){ t.flame.scale.y=0.8+Math.random()*0.5; t.light.intensity=2.3+Math.random()*0.6; }
+}
+
+let scareCooldown=0;
+function updateEntity(dt){
+  if(!entityState.active)return;
+  const looking=lookingAtEntity();
+  const eyeL=entity.userData.eyeLight;
+  const toP=player.pos.clone().sub(entity.position); toP.y=0; const dist=toP.length(); entityState.dist=dist;
+  entity.lookAt(player.pos.x,entity.position.y+1.4,player.pos.z);
+  eyeL.intensity=THREE.MathUtils.clamp(2.5-dist*0.12,0.1,2.2);
+
+  const lit=inTorchLight(entity.position.clone().add(new THREE.Vector3(0,1,0)));
+  if(lit){
+    // 怕光：被火把照到 -> 后退一点，眼睛黯淡
+    toP.normalize(); const ex=entity.position.x-toP.x*1.4*dt*3, ez=entity.position.z-toP.z*1.4*dt*3;
+    entity.position.set(ex,groundHeight(ex,ez),ez); eyeL.intensity*=0.4; entityState.anger=Math.max(0.2,entityState.anger-dt*0.1);
+  } else if(looking){
+    entityState.anger=Math.min(1,entityState.anger+dt*0.05);
+  } else {
+    toP.normalize(); const ap=(0.6+entityState.anger*2.2)*dt;
+    let nx=entity.position.x+toP.x*ap, nz=entity.position.z+toP.z*ap;
+    entity.position.set(nx,groundHeight(nx,nz),nz);
+    if(Math.random()<0.004+entityState.anger*0.01){ const r=Math.max(5,dist*0.5); const ex=player.pos.x-toP.x*r, ez=player.pos.z-toP.z*r; if(!inTorchLight(new THREE.Vector3(ex,groundHeight(ex,ez)+1,ez))){ entity.position.set(ex,groundHeight(ex,ez),ez); sfx.teleport(); } }
+  }
+  entityState.heartbeat-=dt;
+  if(dist<10){ const near=THREE.MathUtils.clamp(1-(dist-2)/8,0.1,1); if(entityState.heartbeat<=0){sfx.heartbeat(near);entityState.heartbeat=0.9-near*0.45;} }
+  entityState.nextWhisper-=dt;
+  if(entityState.nextWhisper<=0&&dist<16){ sfx.whisper(); entityState.nextWhisper=4+Math.random()*6; if(dist<14)showSubtitle(randWhisper()); }
+  scareCooldown-=dt;
+  if(dist<1.7&&scareCooldown<=0&&!lit) jumpScare();
+}
+const WHISPERS=['…别回头…','…我看得见你…','…再近一点…','…这里没有早晨…','…你逃不掉…','…把火把放下…','…后面…'];
+const randWhisper=()=>WHISPERS[Math.floor(Math.random()*WHISPERS.length)];
+const ENTITY_FACE=THREE_OK?makeEntityFaceDataURL():'';
+function jumpScare(){
+  scareCooldown=6; sanity-=32; sfx.scare();
+  const sc=document.getElementById('scare'); sc.style.transition='none'; sc.style.opacity='1';
+  document.getElementById('scareFace').src=ENTITY_FACE; shakeAmount=0.9;
+  setTimeout(()=>{sc.style.transition='opacity .9s';sc.style.opacity='0';},520);
+  const away=entity.position.clone().sub(player.pos).setY(0).normalize().multiplyScalar(10);
+  const ex=player.pos.x+away.x, ez=player.pos.z+away.z; entity.position.set(ex,groundHeight(ex,ez),ez);
+  entityState.anger=Math.min(1,entityState.anger+0.25);
+  if(sanity<=0)die();
+}
+
+// ---------- 碎片 ----------
+function spawnShards(){
+  shards.forEach(s=>scene.remove(s.group)); shards=[]; shardsGot=0;
+  const cx=WORLD.sx/2, cz=WORLD.sz/2;
+  let tries=0;
+  while(shards.length<SHARD_TOTAL && tries<400){
+    tries++;
+    const x=4+Math.floor(Math.random()*(WORLD.sx-8)), z=4+Math.floor(Math.random()*(WORLD.sz-8));
+    if(Math.hypot(x-cx,z-cz)<10) continue;             // 别离出生点太近
+    if(shards.some(s=>Math.hypot(s.gx-x,s.gz-z)<8)) continue; // 彼此分散
+    const y=groundHeight(x,z)+0.8;
+    const g=new THREE.Group();
+    const core=new THREE.Mesh(new THREE.OctahedronGeometry(0.28),new THREE.MeshBasicMaterial({color:0x7fe7c4}));
+    g.add(core); const L=new THREE.PointLight(0x7fe7c4,1.6,6,1.5); g.add(L);
+    g.position.set(x+0.5,y,z+0.5); scene.add(g);
+    shards.push({group:g,core,gx:x,gz:z,base:y});
+  }
+}
+function updateShards(dt){
+  const t=performance.now()*0.001;
+  for(let i=shards.length-1;i>=0;i--){
+    const s=shards[i]; s.core.rotation.y+=dt*2; s.group.position.y=s.base+Math.sin(t*2+i)*0.15;
+    if(player.pos.distanceTo(s.group.position)<1.6){
+      scene.remove(s.group); shards.splice(i,1); shardsGot++; sfx.shard(); jolt(0.06);
+      updateHUD();
+      if(shardsGot>=SHARD_TOTAL){ setObjective('全部碎片到手！','回到出生点的祭坛 —— 它已被点亮'); showSubtitle('祭坛在出生点…快回去！'); }
+      else { showSubtitle(`灵魂碎片 ${shardsGot}/${SHARD_TOTAL}`); }
+    }
+  }
+}
+
+// ---------- 祭坛 ----------
+function buildAltar(){
+  if(altar) scene.remove(altar.group);
+  const sx=WORLD.sx/2|0, sz=WORLD.sz/2|0, gy=groundHeight(sx,sz);
+  const g=new THREE.Group();
+  const base=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.4,1.4),new THREE.MeshLambertMaterial({color:0x222026})); base.position.set(sx+0.5,gy+0.2,sz+0.5); g.add(base);
+  const pillar=new THREE.Mesh(new THREE.BoxGeometry(0.5,1.4,0.5),new THREE.MeshLambertMaterial({color:0x2a2730})); pillar.position.set(sx+0.5,gy+1.1,sz+0.5); g.add(pillar);
+  const orb=new THREE.Mesh(new THREE.IcosahedronGeometry(0.34),new THREE.MeshBasicMaterial({color:0x335544})); orb.position.set(sx+0.5,gy+2.0,sz+0.5); g.add(orb);
+  const L=new THREE.PointLight(0x7fe7c4,0,8,1.5); L.position.set(sx+0.5,gy+2.0,sz+0.5); g.add(L);
+  scene.add(g); altar={group:g,orb,light:L,pos:new THREE.Vector3(sx+0.5,gy+1,sz+0.5)}; altarLit=false;
+}
+function updateAltar(dt){
+  if(!altar)return; altar.orb.rotation.y+=dt;
+  if(shardsGot>=SHARD_TOTAL){
+    altar.light.intensity=3+Math.sin(performance.now()*0.005)*1; altar.orb.material.color.setHex(0x7fe7c4);
+    if(player.pos.distanceTo(altar.pos)<2.6 && !won) winGame();
+  }
+}
+
+// ---------- 理智 ----------
+function updateSanity(dt){
+  let drain=0;
+  if(entityState.active){ if(entityState.dist<6)drain+=(6-entityState.dist)*0.9; if(entityState.dist<14)drain+=0.4; }
+  if(inTorchLight(player.pos)) drain*=0.4; // 站火把光里更安心
+  if(drain>0)sanity-=drain*dt; else sanity=Math.min(100,sanity+1.2*dt);
+  sanity=Math.max(0,Math.min(100,sanity)); if(sanity<=0)die();
+  const fill=document.getElementById('sanityFill'); fill.style.width=sanity+'%';
+  fill.style.background= sanity<30?'linear-gradient(90deg,#7a1c1c,#3a0a0a)':sanity<60?'linear-gradient(90deg,#9a7a23,#4a3a14)':'linear-gradient(90deg,#6b8e23,#3a4a14)';
+  const vig=document.getElementById('vignette'); const it=THREE.MathUtils.clamp((100-sanity)/100,0,1);
+  vig.style.boxShadow=`inset 0 0 ${150-it*30}px ${60+it*120}px rgba(${it>0.6?40:0},0,0,${0.75+it*0.2})`;
+  scene.fog.density=0.030+it*0.04;
+}
+
+let shakeAmount=0;
+function applyShake(){ if(shakeAmount>0.001){ camera.position.x+=(Math.random()-0.5)*shakeAmount*0.3; camera.position.y+=(Math.random()-0.5)*shakeAmount*0.3; shakeAmount*=0.85; } }
+function jolt(a){ shakeAmount=Math.max(shakeAmount,a); }
+
+function die(){ if(!alive||won)return; alive=false; sfx.die(); document.getElementById('deadStat').textContent=`你在黑暗里撑了 ${Math.floor(survived)} 秒，找到了 ${shardsGot}/${SHARD_TOTAL} 块碎片。`; document.exitPointerLock&&document.exitPointerLock(); document.getElementById('deadScreen').style.display='flex'; }
+function winGame(){ if(won)return; won=true; sfx.win(); document.getElementById('winStat')&&(document.getElementById('winStat').textContent=`用时 ${Math.floor(survived)} 秒。你逃出来了。`); document.exitPointerLock&&document.exitPointerLock(); document.getElementById('winScreen').style.display='flex'; }
+
+// ---------- HUD ----------
+let subTimer=0;
+function showSubtitle(t){ const s=document.getElementById('subtitle'); s.textContent=t; s.style.opacity='1'; subTimer=3; }
+function setObjective(main,sub){ document.getElementById('objective').childNodes[0].nodeValue='目标：'+main; document.getElementById('objSub').textContent=sub||''; }
+function updateHUD(){ document.getElementById('shardCount').textContent=shardsGot+' / '+SHARD_TOTAL; document.getElementById('torchCount').textContent=torchesLeft; }
+
+// ---------- 手持火把绘制（DOM canvas） ----------
+const htCanvas=document.getElementById('heldTorch'), htCtx=htCanvas&&htCanvas.getContext('2d');
+function drawHeldTorch(){
+  if(!htCtx)return; const W=120,H=200; htCtx.clearRect(0,0,W,H);
+  const sway=Math.sin(performance.now()*0.003)*4 + (keys['w']||keys['a']||keys['s']||keys['d']?Math.sin(bob)*3:0);
+  const bx=70+sway;
+  // 木棍
+  htCtx.fillStyle='#6b4a26'; htCtx.fillRect(bx, 70, 14, 130);
+  htCtx.fillStyle='#7d5a30'; htCtx.fillRect(bx+10, 70, 4, 130);
+  // 火焰（程序化跳动）
+  const t=performance.now()*0.01; const cx=bx+7;
+  for(let i=0;i<22;i++){
+    const fy=64-i*2.6; const w=(1-i/22)*22*(0.8+Math.sin(t+i*0.5)*0.2);
+    const r=255, gC=Math.max(60,200-i*7), b=Math.max(0,60-i*4);
+    htCtx.fillStyle=`rgba(${r},${gC},${b},${0.9-i*0.03})`;
+    htCtx.fillRect(cx-w/2+Math.sin(t*1.3+i)*2, fy, w, 4);
+  }
+  // 光晕
+  const grd=htCtx.createRadialGradient(cx,40,2,cx,40,60); grd.addColorStop(0,'rgba(255,180,80,.5)'); grd.addColorStop(1,'rgba(255,180,80,0)');
+  htCtx.fillStyle=grd; htCtx.fillRect(0,0,W,120);
+}
+
+// ============================================================
+function init(){
+  scene=new THREE.Scene(); scene.background=new THREE.Color(0x070a12);
+  scene.fog=new THREE.FogExp2(0x070a12,0.032);
+  camera=new THREE.PerspectiveCamera(74,innerWidth/innerHeight,0.05,200);
+  renderer=new THREE.WebGLRenderer({antialias:false}); renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+  document.body.appendChild(renderer.domElement);
+
+  ambient=new THREE.AmbientLight(0x2a3550,0.34); scene.add(ambient);   // 抬高基础亮度：看得清地形
+  hemi=new THREE.HemisphereLight(0x2a3550,0x0a0c10,0.30); scene.add(hemi);
+  moon=new THREE.DirectionalLight(0x6a7aa0,0.22); moon.position.set(-20,40,-10); scene.add(moon);
+  torchLight=new THREE.PointLight(0xffae42,2.6,16,1.2); scene.add(torchLight); // 手持火把暖光
+
+  genWorld(); buildMeshes(); initSelection();
+  entity=buildEntity(); spawnShards(); buildAltar();
+
+  const sx=WORLD.sx/2|0, sz=WORLD.sz/2|0;
+  player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); yaw=0; pitch=0;
+  camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2,0));
+  updateHUD();
+  clock=new THREE.Clock(); buildHotbar(); animate();
+}
+function reset(){
+  sanity=100; alive=true; won=false; survived=0; shardsGot=0; torchesLeft=12;
+  entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0}; entity.visible=false; scareCooldown=0; shakeAmount=0;
+  placedTorches.forEach(t=>scene.remove(t.group)); placedTorches.length=0;
+  genWorld(); buildMeshes(); spawnShards(); buildAltar();
+  const sx=WORLD.sx/2|0, sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); yaw=0; pitch=0;
+  setObjective('找齐 4 块灵魂碎片','它就在林子里。盯紧阴影。'); updateHUD();
+  document.getElementById('deadScreen').style.display='none'; document.getElementById('winScreen').style.display='none';
+  document.getElementById('scare').style.opacity='0';
+  firstSpawnTimer=9+Math.random()*6; started=true; lockPointer();
+}
+
+let firstSpawnTimer=10;
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(0.05,clock.getDelta());
+  if(started&&alive&&!won){
+    survived+=dt;
+    if(!entityState.active){ firstSpawnTimer-=dt; if(firstSpawnTimer<=0){spawnEntity();showSubtitle('林子里…有什么东西醒了。');} }
+    update(dt);
+    if(subTimer>0){ subTimer-=dt; if(subTimer<=0)document.getElementById('subtitle').style.opacity='0'; }
+  }
+  drawHeldTorch(); applyShake(); renderer.render(scene,camera);
+}
+
+// ---------- hotbar ----------
+function buildHotbar(){ /* 状态用右下面板，热栏省略以保持画面干净 */ }
+function setSel(i){ selBlock=(i+BLOCKS.length)%BLOCKS.length; showSubtitle('方块：'+BLOCKS[selBlock].name); }
+
+// ---------- 输入 ----------
+addEventListener('resize',()=>{ if(!camera)return; camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.key===' ')keys[' ']=true;
+  if(k==='r'){ if(started&&pointerLocked)placeTorch(); }
+  if(k>='1'&&k<='5')setSel(parseInt(k)-1); });
+addEventListener('keyup',e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(e.key===' ')keys[' ']=false; });
+addEventListener('wheel',e=>{ if(!pointerLocked)return; setSel(selBlock+(e.deltaY>0?1:-1)); },{passive:true});
+addEventListener('mousemove',e=>{ if(!pointerLocked)return; yaw-=e.movementX*0.0022; pitch-=e.movementY*0.0022; pitch=Math.max(-1.5,Math.min(1.5,pitch)); });
+addEventListener('mousedown',e=>{ if(!started)return; if(!pointerLocked){lockPointer();return;} if(e.button===0)mining=true; else if(e.button===2)placeBlock(); });
+addEventListener('mouseup',e=>{ if(e.button===0)mining=false; });
+addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('pointerlockchange',()=>{ pointerLocked=document.pointerLockElement===renderer.domElement; mining=false; document.getElementById('lockHint').style.display=(started&&!pointerLocked&&alive&&!won)?'block':'none'; });
+function lockPointer(){ try{ const p=renderer.domElement.requestPointerLock(); if(p&&p.catch)p.catch(()=>{}); }catch(e){} }
+
+document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); lockPointer(); document.getElementById('lockHint').style.display='block'; };
+document.getElementById('respawnBtn').onclick=()=>reset();
+document.getElementById('winBtn').onclick=()=>reset();
+
+if(THREE_OK) init();
+else document.getElementById('start').innerHTML='<h1 style="color:#a33">加载失败</h1><p style="color:#888">无法加载 three.min.js。确认它和 index.html 在同一文件夹。</p>';
+</script>
+</body>
+</html>
