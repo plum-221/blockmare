@@ -100,6 +100,34 @@
   #winScreen h1 { font-size:50px; letter-spacing:12px; text-shadow:0 0 22px rgba(80,200,150,.5); }
   #winScreen p { color:#6b8e23; margin-top:14px; letter-spacing:3px; max-width:520px;}
   #winBtn { margin-top:30px; }
+
+  /* ===== 触屏控制（仅 body.touch 显示）===== */
+  #touchUI { position:fixed; inset:0; z-index:30; pointer-events:none; display:none; }
+  body.touch #touchUI { display:block; }
+  #joy { position:absolute; left:26px; bottom:26px; width:130px; height:130px; border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.06),rgba(0,0,0,.25)); border:2px solid rgba(231,217,168,.25); pointer-events:auto; touch-action:none; }
+  #joyKnob { position:absolute; left:50%; top:50%; width:54px; height:54px; border-radius:50%;
+    transform:translate(-50%,-50%); background:radial-gradient(circle,rgba(231,217,168,.5),rgba(120,140,70,.25)); border:1px solid rgba(231,217,168,.5); }
+  #tbtns { position:absolute; right:18px; bottom:20px; display:grid; grid-template-columns:repeat(3,1fr); gap:9px; width:222px; pointer-events:none; }
+  .tbtn { pointer-events:auto; touch-action:none; user-select:none; -webkit-user-select:none;
+    height:60px; border-radius:12px; border:2px solid rgba(231,217,168,.3); background:rgba(10,12,16,.5);
+    color:#cdd1bf; font-family:inherit; font-size:13px; letter-spacing:1px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .tbtn:active { background:rgba(231,217,168,.2); }
+  .tbtn .ic { font-size:18px; line-height:1; margin-bottom:2px; }
+  .tbtn.eat { border-color:rgba(224,106,106,.55); } .tbtn.herb { border-color:rgba(134,196,107,.6); }
+  .tbtn.dig { grid-column:span 1; }
+  #rotateHint { display:none; position:fixed; inset:0; z-index:60; background:#05070b; color:#cdd1bf;
+    flex-direction:column; align-items:center; justify-content:center; text-align:center; font-size:18px; letter-spacing:3px; padding:24px; }
+  #rotateHint .rot { font-size:64px; margin-bottom:18px; animation:rotcue 2s ease-in-out infinite; }
+  @keyframes rotcue { 0%,40%{transform:rotate(0)} 60%,100%{transform:rotate(90deg)} }
+  @media (orientation:portrait){ body.touch #rotateHint { display:flex; } }
+  /* 矮屏（手机横屏）紧凑化 HUD */
+  @media (max-height:480px){
+    .barWrap{ width:150px; } #sanityWrap{bottom:64px;} #hungerWrap{bottom:40px;} #noiseWrap{bottom:16px;}
+    #status .row{ font-size:13px; } #hotbar{ bottom:8px; } .hslot{ width:40px; height:40px; }
+    #joy{ width:104px; height:104px; left:16px; bottom:16px; } #joyKnob{ width:44px; height:44px; }
+    #tbtns{ width:186px; gap:7px; } .tbtn{ height:48px; font-size:11px; }
+  }
   #endScreen { display:none; background:radial-gradient(circle at 50% 40%, #0c1014 0%, #000 82%); }
   #endScreen h1 { font-size:50px; letter-spacing:12px; text-shadow:0 0 22px rgba(120,120,120,.4); }
   #endScreen p { color:#9aa089; margin-top:16px; letter-spacing:2px; max-width:560px; line-height:1.7; white-space:pre-line; }
@@ -184,6 +212,20 @@
   <div id="hotbar"></div>
   <div id="backpack"><h2>背 包</h2><div class="tip">Tab / B 关闭 · 游戏已暂停</div><div id="bagGrid"></div></div>
 </div>
+
+<div id="touchUI">
+  <div id="joy"><div id="joyKnob"></div></div>
+  <div id="tbtns">
+    <div class="tbtn" id="btnTorch"><span class="ic">♨</span>火把</div>
+    <div class="tbtn" id="btnJump"><span class="ic">⤒</span>跳</div>
+    <div class="tbtn dig" id="btnDig"><span class="ic">⛏</span>挖</div>
+    <div class="tbtn" id="btnUse"><span class="ic">✦</span>互动</div>
+    <div class="tbtn" id="btnPlace"><span class="ic">▣</span>放</div>
+    <div class="tbtn eat" id="btnEat"><span class="ic">✦</span>食物</div>
+    <div class="tbtn herb" id="btnHerb"><span class="ic">❦</span>恢复</div>
+  </div>
+</div>
+<div id="rotateHint"><div class="rot">▭</div>请把手机横过来游玩<br><span style="font-size:13px;color:#8a8f7a;letter-spacing:2px;">横屏后自动进入</span></div>
 
 <script src="three.min.js"></script>
 <script>
@@ -531,6 +573,7 @@ function update(dt){
   const fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw)), right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
   let move=new THREE.Vector3();
   if(keys['w'])move.add(fwd); if(keys['s'])move.sub(fwd); if(keys['d'])move.add(right); if(keys['a'])move.sub(right);
+  if(joyVec.x||joyVec.z){ move.add(fwd.clone().multiplyScalar(-joyVec.z)).add(right.clone().multiplyScalar(joyVec.x)); }   // 触屏摇杆
   const moving=move.lengthSq()>0;
   if(moving){ move.normalize().multiplyScalar(sp*dt); stepTimer-=dt*(canSprint?1.5:1); if(stepTimer<=0){sfx.step();stepTimer=0.52;} bob+=dt*(canSprint?14:9); addNoise(dt*(canSprint?0.9:0.16)); }
   player.vel.x=move.x; player.vel.z=move.z;
@@ -779,7 +822,7 @@ function init(){
   genWorld(); buildAllMeshes(); initSelection(); entity=buildEntity(); for(let i=0;i<2;i++)phantoms.push(buildPhantom()); spawnShards(); spawnFoods(); spawnHerbs(); spawnVillageObjects(); buildAltar(); wisp=buildWisp();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
   camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2,0)); updateHUD(); buildHotbar();
-  clock=new THREE.Clock(); animate();
+  clock=new THREE.Clock(); initTouch(); animate();
 }
 function reset(){
   sanity=100; hunger=100; alive=true; won=false; survived=0; shardsGot=0; storiesRead=0;
@@ -852,14 +895,45 @@ addEventListener('mousemove',e=>{ if(!pointerLocked)return;
   // 异常尖峰整帧丢弃：人手单帧不可能这么大，几乎一定是指针锁定的抽风数据（会造成瞬间反向甩头）
   if(Math.abs(dx)>200 || Math.abs(dy)>200) return;
   yaw-=dx*0.0022; pitch-=dy*0.0022; pitch=Math.max(-1.5,Math.min(1.5,pitch)); });
-addEventListener('mousedown',e=>{ if(!started||bagOpen)return; if(!pointerLocked){lockPointer();return;} if(e.button===0)mining=true; else if(e.button===2)placeBlock(); });
+addEventListener('mousedown',e=>{ if(isTouch)return; if(!started||bagOpen)return; if(!pointerLocked){lockPointer();return;} if(e.button===0)mining=true; else if(e.button===2)placeBlock(); });
 addEventListener('mouseup',e=>{ if(e.button===0)mining=false; });
 addEventListener('contextmenu',e=>e.preventDefault());
-document.addEventListener('pointerlockchange',()=>{ pointerLocked=document.pointerLockElement===renderer.domElement; mining=false; document.getElementById('lockHint').style.display=(started&&!pointerLocked&&alive&&!won&&!bagOpen)?'block':'none'; });
+document.addEventListener('pointerlockchange',()=>{ pointerLocked=document.pointerLockElement===renderer.domElement; mining=false; document.getElementById('lockHint').style.display=(!isTouch&&started&&!pointerLocked&&alive&&!won&&!bagOpen)?'block':'none'; });
 function lockPointer(){ const el=renderer.domElement;
   try{ const p=el.requestPointerLock({unadjustedMovement:true});   // 原始鼠标数据：绕过系统加速，位移更稳
     if(p&&p.catch) p.catch(()=>{ try{ el.requestPointerLock(); }catch(_){} });   // 不支持则回退普通锁定
   }catch(e){ try{ el.requestPointerLock(); }catch(_){} } }
+
+// ===== 触屏控制（手机）：左摇杆移动 · 右半屏拖动转视角 · 按钮组 =====
+const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
+let joyVec={x:0,z:0};
+function initTouch(){
+  if(!isTouch) return; document.body.classList.add('touch');
+  const canvas=renderer.domElement;
+  // 右半屏（canvas 空白处）拖动转视角
+  let lookId=null,lx=0,ly=0;
+  canvas.addEventListener('touchstart',e=>{ if(!started||bagOpen||!alive||won)return; const t=e.changedTouches[0]; lookId=t.identifier; lx=t.clientX; ly=t.clientY; },{passive:true});
+  canvas.addEventListener('touchmove',e=>{ for(const t of e.changedTouches){ if(t.identifier===lookId){ yaw-=(t.clientX-lx)*0.005; pitch-=(t.clientY-ly)*0.005; pitch=Math.max(-1.5,Math.min(1.5,pitch)); lx=t.clientX; ly=t.clientY; } } },{passive:true});
+  const lookEnd=e=>{ for(const t of e.changedTouches) if(t.identifier===lookId)lookId=null; };
+  canvas.addEventListener('touchend',lookEnd); canvas.addEventListener('touchcancel',lookEnd);
+  // 左下摇杆（带死区）
+  const joy=document.getElementById('joy'), knob=document.getElementById('joyKnob'); let joyId=null;
+  const joyMove=t=>{ const r=joy.getBoundingClientRect(),R=r.width/2,cx=r.left+R,cy=r.top+R; let dx=t.clientX-cx,dy=t.clientY-cy; const d=Math.hypot(dx,dy)||1; if(d>R){dx*=R/d;dy*=R/d;} knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; joyVec.x=Math.abs(dx)<R*0.2?0:dx/R; joyVec.z=Math.abs(dy)<R*0.2?0:dy/R; };
+  joy.addEventListener('touchstart',e=>{ e.preventDefault(); const t=e.changedTouches[0]; joyId=t.identifier; joyMove(t); },{passive:false});
+  joy.addEventListener('touchmove',e=>{ e.preventDefault(); for(const t of e.changedTouches) if(t.identifier===joyId)joyMove(t); },{passive:false});
+  const joyEnd=e=>{ for(const t of e.changedTouches) if(t.identifier===joyId){ joyId=null; joyVec.x=joyVec.z=0; knob.style.transform='translate(-50%,-50%)'; } };
+  joy.addEventListener('touchend',joyEnd); joy.addEventListener('touchcancel',joyEnd);
+  // 按钮（长按 / 点按）
+  const hold=(id,dn,up)=>{ const el=document.getElementById(id); el.addEventListener('touchstart',e=>{e.preventDefault();dn&&dn();},{passive:false}); el.addEventListener('touchend',e=>{e.preventDefault();up&&up();},{passive:false}); el.addEventListener('touchcancel',()=>{up&&up();}); };
+  const tap=(id,fn)=>{ const el=document.getElementById(id); el.addEventListener('touchstart',e=>{e.preventDefault();fn();},{passive:false}); };
+  hold('btnJump',()=>{keys[' ']=true;},()=>{keys[' ']=false;});
+  hold('btnDig',()=>{mining=true;},()=>{mining=false;});
+  tap('btnPlace',()=>placeBlock()); tap('btnUse',()=>doInteract()); tap('btnTorch',()=>placeTorch());
+  tap('btnEat',()=>eat()); tap('btnHerb',()=>useHerb());
+}
+function tryLandscape(){ if(!isTouch)return; const el=document.documentElement;
+  const lock=()=>{ try{ if(screen.orientation&&screen.orientation.lock)screen.orientation.lock('landscape').catch(()=>{}); }catch(e){} };
+  try{ if(el.requestFullscreen) el.requestFullscreen().then(lock,lock); else lock(); }catch(e){ lock(); } }
 
 // 自备背景音乐（BYO）：玩家选本地音频当循环 BGM —— 不内嵌任何素材，零版权
 const bgm=new Audio(); bgm.loop=true; bgm.volume=0.55;
@@ -867,7 +941,8 @@ const bgm=new Audio(); bgm.loop=true; bgm.volume=0.55;
   if(fi) fi.addEventListener('change',e=>{ const f=e.target.files&&e.target.files[0]; if(!f)return; if(bgm.src)URL.revokeObjectURL(bgm.src); bgm.src=URL.createObjectURL(f); bgm.play().catch(()=>{}); nm.textContent='♪ '+f.name+'（已载入 · 进入后循环播放）'; nm.style.color='#7fe7c4'; });
   if(vol) vol.addEventListener('input',e=>{ bgm.volume=e.target.value/100; });
 })();
-document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); if(bgm.src)bgm.play().catch(()=>{}); startQuest(); lockPointer(); document.getElementById('lockHint').style.display='block'; };
+document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); if(bgm.src)bgm.play().catch(()=>{}); startQuest();
+  if(isTouch){ tryLandscape(); } else { lockPointer(); document.getElementById('lockHint').style.display='block'; } };
 document.getElementById('respawnBtn').onclick=()=>reset();
 document.getElementById('winBtn').onclick=()=>reset();
 document.getElementById('endBtn').onclick=()=>reset();
