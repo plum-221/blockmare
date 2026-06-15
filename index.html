@@ -35,7 +35,7 @@
   #status { position:absolute; right:24px; bottom:24px; text-align:right; color:#cdd1bf; text-shadow:0 0 6px #000; }
   #status .row { font-size:15px; letter-spacing:2px; margin-bottom:5px; }
   #status .k { color:#8a8f7a; font-size:11px; }
-  #shardIcon { color:#7fe7c4; } #torchIcon { color:#ffb347; } #foodIcon { color:#e06a6a; }
+  #shardIcon { color:#7fe7c4; } #torchIcon { color:#ffb347; } #foodIcon { color:#e06a6a; } #herbIcon { color:#86c46b; }
 
   /* 底部快捷栏 */
   #hotbar { position:absolute; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:6px; }
@@ -94,6 +94,11 @@
   #winScreen h1 { font-size:50px; letter-spacing:12px; text-shadow:0 0 22px rgba(80,200,150,.5); }
   #winScreen p { color:#6b8e23; margin-top:14px; letter-spacing:3px; max-width:520px;}
   #winBtn { margin-top:30px; }
+  #endScreen { display:none; background:radial-gradient(circle at 50% 40%, #0c1014 0%, #000 82%); }
+  #endScreen h1 { font-size:50px; letter-spacing:12px; text-shadow:0 0 22px rgba(120,120,120,.4); }
+  #endScreen p { color:#9aa089; margin-top:16px; letter-spacing:2px; max-width:560px; line-height:1.7; white-space:pre-line; }
+  #endBtn { pointer-events:auto; cursor:pointer; margin-top:30px; border:2px solid #6b8e23; background:rgba(18,20,15,.4); color:#cdd1bf; padding:14px 50px; font-family:inherit; font-size:19px; letter-spacing:6px; transition:.25s; }
+  #endBtn:hover { background:rgba(107,142,35,.18); }
 </style>
 </head>
 <body>
@@ -109,9 +114,11 @@
     集齐被封存的 <span class="g">4 块灵魂碎片</span>（部分藏在<b>废弃村庄</b>里），带回出生点的<b>黎明祭坛</b>点亮它，迎来黎明 = 逃脱。<br>
     探索村庄废墟：<b>石碑</b>藏着真相，<b>补给箱</b>给你<span class="o">火把</span>和<span class="r">食物</span>。但废墟也最危险——<b>它</b>常在那游荡。<br>
     村庄之外是<b>枯林</b>——更黑、枯树成片、极易迷路。带够<span class="o">火把</span>再进去。<br>
-    <span class="o">火把</span>能逼退它、照亮路；<span class="r">食物</span>填饱肚子（饿了会降速、掉理智）。<br><br>
+    <span class="o">火把</span>能逼退它、照亮路；<span class="r">食物</span>填饱肚子（饿了会降速、掉理智）。<br>
+    一缕<span class="g">残魂</span>会在你身前飘动<b>领路</b>——跟着它走，就能找到下一块碎片、最后回到祭坛。<br>
+    <span class="g">收集碎片 / 读石碑往事 / 服安神草药</span>都能回<b>理智</b>；理智归零你会沉沦。<br><br>
     <b>WASD</b> 移动 · <b>鼠标</b> 视角 · <b>空格</b> 跳 · <b>Shift</b> 疾跑<br>
-    <b>左键长按</b> 挖方块(进背包) · <b>右键</b> 放方块(消耗) · <b>R</b> 插火把 · <b>E</b> 互动 · <b>Q</b> 吃东西<br>
+    <b>左键长按</b> 挖方块(进背包) · <b>右键</b> 放方块(消耗) · <b>R</b> 插火把 · <b>E</b> 互动 · <b>Q</b> 吃浆果 · <b>G</b> 用草药<br>
     <b>1-5/滚轮</b> 选方块 · <b>Tab / B</b> 打开背包(暂停)<br>
     <span style="color:#c98a3a">疾跑/挖掘会发出声响引它靠近；潜行(慢走)能甩开它。用方块堆 ≥2 格高的墙挡住它。</span>
   </div>
@@ -129,10 +136,15 @@
   <p id="winStat">黎明祭坛亮起，第一缕光刺破长夜。你逃出来了。</p>
   <div id="winBtn">再 玩 一 次</div>
 </div>
+<div id="endScreen" class="overlay">
+  <h1 id="endTitle"></h1>
+  <p id="endText"></p>
+  <div id="endBtn">再 玩 一 次</div>
+</div>
 
 <div id="hud">
   <div id="objective">目标：找齐 4 块灵魂碎片<div id="objSub">探索废弃村庄。盯紧阴影。</div></div>
-  <div id="hint">E 互动 · R 插火把 · Q 吃东西 · 左键长按挖</div>
+  <div id="hint">跟随残魂找碎片 · E 互动 · R 插火把 · Q 吃浆果 · G 用草药 · 左键长按挖</div>
   <div id="subtitle"></div>
   <div id="interact"></div>
   <div id="lore"></div>
@@ -148,6 +160,7 @@
     <div class="row"><span id="shardIcon">◆</span> 碎片 <span id="shardCount">0 / 4</span></div>
     <div class="row"><span id="torchIcon">♨</span> 火把 <span id="torchCount">10</span></div>
     <div class="row"><span id="foodIcon">✦</span> 食物 <span id="foodCount">3</span></div>
+    <div class="row"><span id="herbIcon">❦</span> 草药 <span id="herbCount">0</span></div>
   </div>
   <div id="lockHint">点击画面 · 锁定鼠标转动视角<br><span style="color:#8a8f7a;font-size:12px;">（WASD 已可移动 · ESC 解锁）</span></div>
   <div id="scare"><img id="scareFace" alt=""></div>
@@ -208,13 +221,16 @@ let shards=[], shardsGot=0;
 let altar=null;
 const placedTorches=[];
 // 统一背包：火把/食物 + 5 种方块（方块成为资源：挖到才有，放置消耗）
-const inv={torch:10, food:3, grass:0, dirt:0, stone:0, plank:0, wood:0};
+const inv={torch:10, food:3, herb:0, grass:0, dirt:0, stone:0, plank:0, wood:0};
 let bagOpen=false;
 // Phase 2：声响吸引 + 幻觉
 let noiseLevel=0, lurePos=null, lureTimer=0;
 const phantoms=[]; let hallT=6;
 let chests=[], steles=[], foods=[], villages=[];
 let storiesRead=0;
+// Phase 3：叙事闭环（残魂引路 + 章节 + 结局 + 草药）
+let wisp=null, quest='intro', questT=0, altarChoice=false;
+let herbs=[];
 
 // 序章碑（出生点）
 const LORE_PROLOGUE='「第七日，太阳没有升起。我们点起所有火把，等天亮——可火把，是会灭的。」';
@@ -504,7 +520,7 @@ function update(dt){
   const camDir=camera.getWorldDirection(new THREE.Vector3());
   torchLight.position.copy(camera.position).add(camDir.clone().multiplyScalar(0.6)).add(new THREE.Vector3(0,-0.2,0));
 
-  updateDig(dt); updateEntity(dt); updateShards(dt); updateFoods(dt); updateAltar(dt);
+  updateDig(dt); updateEntity(dt); updateShards(dt); updateFoods(dt); updateHerbs(dt); updateAltar(dt); updateWisp(dt); updateQuest(dt);
   updateHunger(dt,moving,canSprint); updateSanity(dt); updateInteract();
   // 枯林更暗：踏入外围后雾更浓、环境光更沉（叠加在理智雾之上）
   const fdark = inDeadForest(player.pos);
@@ -580,9 +596,9 @@ function spawnShards(){
 }
 function updateShards(dt){ const t=performance.now()*0.001;
   for(let i=shards.length-1;i>=0;i--){ const s=shards[i]; s.core.rotation.y+=dt*2; s.group.position.y=s.base+Math.sin(t*2+i)*0.15;
-    if(player.pos.distanceTo(s.group.position)<1.6){ scene.remove(s.group); shards.splice(i,1); shardsGot++; sfx.shard(); jolt(0.06); updateHUD();
-      if(shardsGot>=SHARD_TOTAL){ setObjective('碎片到齐！','回出生点的黎明祭坛 —— 已点亮'); showSubtitle('祭坛在出生点…快回去！'); }
-      else showSubtitle(`灵魂碎片 ${shardsGot}/${SHARD_TOTAL}`); } } }
+    if(player.pos.distanceTo(s.group.position)<1.6){ scene.remove(s.group); shards.splice(i,1); shardsGot++; sfx.shard(); jolt(0.06); sanity=Math.min(100,sanity+25); updateHUD();
+      if(shardsGot>=SHARD_TOTAL){ showSubtitle('最后一缕残魂归位…（理智 +25）'); }
+      else { setObjective(`找回灵魂碎片 ${shardsGot} / ${SHARD_TOTAL}`,'跟随残魂'); showSubtitle(`灵魂碎片 ${shardsGot}/${SHARD_TOTAL}（理智 +25）`); } } } }
 
 // ---------- 食物 ----------
 function spawnFoods(){
@@ -607,11 +623,14 @@ function nearestInteractable(){ let best=null,bd=2.8;
   for(const c of chests){ if(c.opened)continue; const d=player.pos.distanceTo(c.pos); if(d<bd){bd=d;best={type:'chest',obj:c};} }
   for(const s of steles){ const d=player.pos.distanceTo(s.pos); if(d<bd){bd=d;best={type:'stele',obj:s};} }
   return best; }
-function updateInteract(){ const it=nearestInteractable(); const el=document.getElementById('interact');
+function updateInteract(){ const el=document.getElementById('interact');
+  if(altarChoice){ el.innerHTML='[ E ] 以碎片点亮祭坛　·　[ F ] 献出自己'; el.style.opacity='1'; return; }
+  const it=nearestInteractable();
   if(it){ el.textContent = it.type==='chest'?'[ E ] 打开补给箱':'[ E ] 阅读石碑'; el.style.opacity='1'; } else el.style.opacity='0'; }
-function doInteract(){ const it=nearestInteractable(); if(!it)return;
+function doInteract(){ if(altarChoice){ resolveAltar('light'); return; }
+  const it=nearestInteractable(); if(!it)return;
   if(it.type==='chest'){ const c=it.obj; c.opened=true; c.lid.rotation.x=-1.1; c.lid.position.z=-0.3; const t=2+Math.floor(Math.random()*3),f=1+Math.floor(Math.random()*2); inv.torch+=t; inv.food+=f; sfx.chest(); updateHUD(); refreshHotbar(); showSubtitle(`补给：火把 +${t}，浆果 +${f}`); }
-  else { const s=it.obj; if(!s.read && s.name && s.name!=='序章'){ storiesRead++; showSubtitle(`村民往事 ${storiesRead}/${STORIES.length}`); } showLore((s.name?('— '+s.name+' —\n'):'')+s.text); s.read=true; sfx.lore(); } }
+  else { const s=it.obj; if(!s.read && s.name && s.name!=='序章'){ storiesRead++; sanity=Math.min(100,sanity+18); showSubtitle(`村民往事 ${storiesRead}/${STORIES.length}（理智 +18）`); } showLore((s.name?('— '+s.name+' —\n'):'')+s.text); s.read=true; sfx.lore(); } }
 
 // ---------- 祭坛 ----------
 function buildAltar(){ if(altar) scene.remove(altar.group);
@@ -622,7 +641,66 @@ function buildAltar(){ if(altar) scene.remove(altar.group);
   const L=new THREE.PointLight(0x7fe7c4,0,8,1.5); L.position.set(sx+0.5,gy+2.0,sz+0.5); g.add(L); scene.add(g);
   altar={group:g,orb,light:L,pos:new THREE.Vector3(sx+0.5,gy+1,sz+0.5)}; }
 function updateAltar(dt){ if(!altar)return; altar.orb.rotation.y+=dt;
-  if(shardsGot>=SHARD_TOTAL){ altar.light.intensity=3+Math.sin(performance.now()*0.005); altar.orb.material.color.setHex(0x7fe7c4); if(player.pos.distanceTo(altar.pos)<2.6&&!won) winGame(); } }
+  if(shardsGot>=SHARD_TOTAL){ altar.light.intensity=3+Math.sin(performance.now()*0.005); altar.orb.material.color.setHex(0x7fe7c4);
+    altarChoice = player.pos.distanceTo(altar.pos)<2.8 && !won;
+  } else altarChoice=false; }
+
+// ============================================================
+// ---------- 残魂引路（残魂光点朝当前目标领路）+ 章节推进 ----------
+function buildWisp(){ const g=new THREE.Group();
+  const core=new THREE.Mesh(new THREE.SphereGeometry(0.12,10,8),new THREE.MeshBasicMaterial({color:0xbdfff0,transparent:true,opacity:0.95}));
+  const halo=new THREE.Mesh(new THREE.SphereGeometry(0.26,10,8),new THREE.MeshBasicMaterial({color:0x7fe7c4,transparent:true,opacity:0.18})); g.add(core); g.add(halo);
+  const L=new THREE.PointLight(0x9ff0d6,1.2,5,1.6); g.add(L); g.userData={core,halo,light:L}; g.visible=false; scene.add(g); return g; }
+// 当前目标点：未集齐→最近未收集碎片；已集齐/归坛→祭坛
+function objectiveTarget(){
+  if(quest==='return' || shardsGot>=SHARD_TOTAL){ return altar?altar.pos.clone().setY(altar.pos.y+1.0):player.pos.clone(); }
+  let best=null,bd=1e9; for(const s of shards){ const d=player.pos.distanceTo(s.group.position); if(d<bd){bd=d;best=s;} }
+  return best?best.group.position.clone():(altar?altar.pos.clone():player.pos.clone());
+}
+function updateWisp(dt){ if(!wisp)return; const show=started&&alive&&!won; wisp.visible=show; if(!show)return;
+  const t=performance.now()*0.001; const tgt=objectiveTarget();
+  const to=tgt.clone(); to.y=player.pos.y; const flat=to.sub(player.pos); const dist=flat.length()||1;
+  // 领在身前几米（不越过目标），靠近时悬停目标上方
+  let aim; if(dist<3){ aim=tgt.clone(); } else { aim=player.pos.clone().add(flat.multiplyScalar(Math.min(3.5,dist*0.5)/dist)); }
+  aim.y=player.pos.y+1.25+Math.sin(t*2.2)*0.18;
+  wisp.position.lerp(aim, Math.min(1,dt*2.6));
+  wisp.userData.light.intensity=1.0+Math.sin(t*4)*0.4; wisp.userData.halo.material.opacity=0.14+Math.sin(t*3)*0.06;
+}
+function updateQuest(dt){
+  if(quest==='intro'){ questT+=dt; const moved=keys['w']||keys['a']||keys['s']||keys['d'];
+    if(questT>2.6 || moved){ quest='collect'; setObjective(`找回灵魂碎片 0 / ${SHARD_TOTAL}`,'跟随残魂 · 走近发光碎片自动收集'); } }
+  else if(quest==='collect' && shardsGot>=SHARD_TOTAL){ quest='return'; setObjective('回黎明祭坛','残魂为你指路 · 走近祭坛按 E'); showSubtitle('碎片到齐了…残魂转身，指向出生点的祭坛。'); }
+}
+function startQuest(){ quest='intro'; questT=0; altarChoice=false; if(wisp)wisp.visible=true; setObjective('跟随残魂','找回 4 块灵魂碎片'); showSubtitle('一缕残魂缠上了你…跟着它走。'); }
+
+// ---------- 安神草药（回理智的可拾取物）----------
+function spawnHerbs(){ herbs.forEach(h=>scene.remove(h.group)); herbs=[]; const cx=WORLD.sx/2,cz=WORLD.sz/2;
+  for(let i=0;i<7;i++){ const x=3+Math.floor(Math.random()*(WORLD.sx-6)),z=3+Math.floor(Math.random()*(WORLD.sz-6)); const y=groundHeight(x,z);
+    const g=new THREE.Group(); const stem=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.22,0.04),new THREE.MeshLambertMaterial({color:0x4a7a3a})); stem.position.y=0.11; g.add(stem);
+    const bud=new THREE.Mesh(new THREE.SphereGeometry(0.11,8,6),new THREE.MeshLambertMaterial({color:0x86c46b,emissive:0x16320c})); bud.position.y=0.26; g.add(bud);
+    g.position.set(x+0.5,y,z+0.5); scene.add(g); herbs.push({group:g,base:y}); } }
+function updateHerbs(dt){ const t=performance.now()*0.002;
+  for(let i=herbs.length-1;i>=0;i--){ const h=herbs[i]; h.group.position.y=h.base+0.08+Math.sin(t+i)*0.04; h.group.rotation.y+=dt*0.6;
+    if(player.pos.distanceTo(h.group.position.clone().setY(player.pos.y))<1.3 && Math.abs(h.group.position.y-player.pos.y)<2){ scene.remove(h.group); herbs.splice(i,1); inv.herb++; sfx.pickup(); updateHUD(); showSubtitle('采到安神草药 +1（G 服用回理智）'); } } }
+function useHerb(){ if(inv.herb<=0){ showSubtitle('没有安神草药了'); return; } if(sanity>=100){ showSubtitle('此刻心神尚安'); return; }
+  inv.herb--; sanity=Math.min(100,sanity+30); sfx.eat(); jolt(0.02); updateHUD(); showSubtitle('服下安神草药…呼吸慢了下来（理智 +30）'); if(bagOpen)refreshBag(); }
+
+// ---------- 4 结局 + 祭坛最终选择 ----------
+const ENDINGS={
+  dawn:     {t:'DAWN · 黎明',      c:'#7fe7c4', s:'你点亮祭坛，安顿了所有残魂。第一缕光刺破长夜——你与他们，都自由了。'},
+  escape:   {t:'ESCAPE · 逃离',    c:'#cdd1bf', s:'祭坛亮起，你逃出了长夜。可那些没读完的名字，会在别处的梦里继续喊你。'},
+  sink:     {t:'LOST · 沉沦',      c:'#b5402f', s:'理智耗尽，你成了它的一部分。又一双眼睛，在黑暗里，等下一个还醒着的人。'},
+  sacrifice:{t:'SACRIFICE · 献祭', c:'#ffb347', s:'你没有用碎片，而是走上祭坛，把自己交了出去。天亮了——为了别人。'},
+};
+function endGame(type){ if(won)return; won=true; alive=false; altarChoice=false; const e=ENDINGS[type]||ENDINGS.escape;
+  (type==='sink'?sfx.die():sfx.win());
+  const tt=document.getElementById('endTitle'); tt.textContent=e.t; tt.style.color=e.c;
+  document.getElementById('endText').textContent=`用时 ${Math.floor(survived)} 秒 · 碎片 ${shardsGot}/${SHARD_TOTAL} · 往事 ${storiesRead}/${STORIES.length}\n\n${e.s}`;
+  const b=document.getElementById('endBtn'); b.style.borderColor=e.c; b.style.color=e.c;
+  document.exitPointerLock&&document.exitPointerLock(); document.getElementById('endScreen').style.display='flex'; }
+function resolveAltar(mode){ if(won)return;
+  if(mode==='sacrifice'){ endGame('sacrifice'); return; }
+  if(storiesRead>=STORIES.length && sanity>=40) endGame('dawn'); else endGame('escape'); }
 
 // ---------- 饥饿 / 理智 ----------
 function updateHunger(dt,moving,sprint){ hunger-=(0.25+(moving?0.18:0)+(sprint?0.6:0))*dt; hunger=Math.max(0,Math.min(100,hunger));
@@ -643,15 +721,14 @@ function updateSanity(dt){ let drain=0;
 let shakeAmount=0;
 function applyShake(){ if(shakeAmount>0.001){ camera.position.x+=(Math.random()-0.5)*shakeAmount*0.3; camera.position.y+=(Math.random()-0.5)*shakeAmount*0.3; shakeAmount*=0.85; } }
 function jolt(a){ shakeAmount=Math.max(shakeAmount,a); }
-function die(){ if(!alive||won)return; alive=false; sfx.die(); document.getElementById('deadStat').textContent=`你在长夜里撑了 ${Math.floor(survived)} 秒，找到 ${shardsGot}/${SHARD_TOTAL} 块碎片。`; document.exitPointerLock&&document.exitPointerLock(); document.getElementById('deadScreen').style.display='flex'; }
-function winGame(){ if(won)return; won=true; sfx.win(); document.getElementById('winStat').textContent=`用时 ${Math.floor(survived)} 秒。黎明祭坛亮起，你迎来了第八日的太阳。`; document.exitPointerLock&&document.exitPointerLock(); document.getElementById('winScreen').style.display='flex'; }
+function die(){ if(!alive||won)return; endGame('sink'); }   // 理智归零 = 沉沦结局
 
 // ---------- HUD ----------
 let subTimer=0, loreTimer=0;
 function showSubtitle(t){ const s=document.getElementById('subtitle'); s.textContent=t; s.style.opacity='1'; subTimer=3; }
 function showLore(t){ const l=document.getElementById('lore'); l.innerHTML=t.replace(/\n/g,'<br>'); l.style.opacity='1'; loreTimer=8; }
 function setObjective(main,sub){ document.getElementById('objective').childNodes[0].nodeValue='目标：'+main; document.getElementById('objSub').textContent=sub||''; }
-function updateHUD(){ document.getElementById('shardCount').textContent=shardsGot+' / '+SHARD_TOTAL; document.getElementById('torchCount').textContent=inv.torch; document.getElementById('foodCount').textContent=inv.food; }
+function updateHUD(){ document.getElementById('shardCount').textContent=shardsGot+' / '+SHARD_TOTAL; document.getElementById('torchCount').textContent=inv.torch; document.getElementById('foodCount').textContent=inv.food; document.getElementById('herbCount').textContent=inv.herb; }
 
 const htCanvas=document.getElementById('heldTorch'), htCtx=htCanvas&&htCanvas.getContext('2d');
 function drawHeldTorch(){ if(!htCtx)return; const W=120; htCtx.clearRect(0,0,W,200);
@@ -670,23 +747,23 @@ function init(){
   hemi=new THREE.HemisphereLight(0x2a3550,0x0a0c10,0.30); scene.add(hemi);
   moon=new THREE.DirectionalLight(0x6a7aa0,0.22); moon.position.set(-20,40,-10); scene.add(moon);
   torchLight=new THREE.PointLight(0xffae42,2.6,16,1.2); scene.add(torchLight);
-  genWorld(); buildAllMeshes(); initSelection(); entity=buildEntity(); for(let i=0;i<2;i++)phantoms.push(buildPhantom()); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
+  genWorld(); buildAllMeshes(); initSelection(); entity=buildEntity(); for(let i=0;i<2;i++)phantoms.push(buildPhantom()); spawnShards(); spawnFoods(); spawnHerbs(); spawnVillageObjects(); buildAltar(); wisp=buildWisp();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
   camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2,0)); updateHUD(); buildHotbar();
   clock=new THREE.Clock(); animate();
 }
 function reset(){
   sanity=100; hunger=100; alive=true; won=false; survived=0; shardsGot=0; storiesRead=0;
-  inv.torch=10; inv.food=3; inv.grass=inv.dirt=inv.stone=inv.plank=inv.wood=0;
+  inv.torch=10; inv.food=3; inv.herb=0; inv.grass=inv.dirt=inv.stone=inv.plank=inv.wood=0;
   bagOpen=false; document.getElementById('backpack').style.display='none'; document.body.style.cursor='none'; refreshHotbar();
   noiseLevel=0; lureTimer=0; lurePos=null; hallT=6; phantoms.forEach(p=>{p.visible=false;p.userData.skin.opacity=0;p.userData.em.opacity=0;});
   entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0,seen:0,reappear:0,stepT:0}; entity.visible=false; scareCooldown=0; heartT=0; ambT=6; shakeAmount=0;
   const gl=document.getElementById('glitch'); gl.style.opacity='0'; if(renderer)renderer.domElement.style.filter='none';
   placedTorches.forEach(t=>scene.remove(t.group)); placedTorches.length=0;
-  genWorld(); buildAllMeshes(); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
+  genWorld(); buildAllMeshes(); spawnShards(); spawnFoods(); spawnHerbs(); spawnVillageObjects(); buildAltar();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
-  setObjective('找齐 4 块灵魂碎片','探索废弃村庄。盯紧阴影。'); updateHUD();
-  document.getElementById('deadScreen').style.display='none'; document.getElementById('winScreen').style.display='none'; document.getElementById('scare').style.opacity='0';
+  updateHUD(); startQuest();
+  document.getElementById('deadScreen').style.display='none'; document.getElementById('winScreen').style.display='none'; document.getElementById('endScreen').style.display='none'; document.getElementById('scare').style.opacity='0';
   firstSpawnTimer=9+Math.random()*6; started=true; lockPointer();
 }
 
@@ -708,6 +785,7 @@ function drawItemIcon(cv,id){ const g=cv.getContext('2d'); const S=cv.width; g.c
   if(blk){ g.imageSmoothingEnabled=false; g.drawImage(blk.tex.image,0,0,S,S); return; }
   if(id==='torch'){ g.fillStyle='#6b4a26'; g.fillRect(S*0.45,S*0.4,S*0.1,S*0.55); for(let i=0;i<10;i++){ g.fillStyle=`rgba(255,${160-i*8},40,${0.9-i*0.07})`; const w=(1-i/10)*S*0.4; g.fillRect(S*0.5-w/2,S*0.4-i*S*0.035,w,S*0.05);} return; }
   if(id==='food'){ g.fillStyle='#c0392b'; g.beginPath(); g.arc(S*0.5,S*0.55,S*0.26,0,7); g.fill(); g.strokeStyle='#3a7a2a'; g.lineWidth=S*0.06; g.beginPath(); g.moveTo(S*0.5,S*0.3); g.lineTo(S*0.62,S*0.16); g.stroke(); return; }
+  if(id==='herb'){ g.strokeStyle='#4a7a3a'; g.lineWidth=S*0.05; g.beginPath(); g.moveTo(S*0.5,S*0.88); g.lineTo(S*0.5,S*0.4); g.stroke(); g.fillStyle='#86c46b'; [[-1,0.42],[1,0.42],[0,0.28]].forEach(([dx,fy])=>{ g.beginPath(); g.ellipse(S*(0.5+dx*0.16),S*fy,S*0.12,S*0.07,dx*0.7,0,7); g.fill(); }); return; }
   if(id==='shard'){ g.fillStyle='#7fe7c4'; g.beginPath(); g.moveTo(S*0.5,S*0.14); g.lineTo(S*0.82,S*0.5); g.lineTo(S*0.5,S*0.86); g.lineTo(S*0.18,S*0.5); g.closePath(); g.fill(); return; }
 }
 function buildHotbar(){ const bar=document.getElementById('hotbar'); if(!bar)return; bar.innerHTML='';
@@ -721,7 +799,7 @@ function buildHotbar(){ const bar=document.getElementById('hotbar'); if(!bar)ret
 function refreshHotbar(){ const bar=document.getElementById('hotbar'); if(!bar||!bar.children.length)return;
   [...bar.children].forEach((s,i)=>{ const id=BLOCKS[i].id; const c=inv[id]||0; s.classList.toggle('on',i===selBlock); s.classList.toggle('empty',c<=0); s.querySelector('.cnt').textContent=c>0?c:''; }); }
 function refreshBag(){ const grid=document.getElementById('bagGrid'); if(!grid)return; grid.innerHTML='';
-  const order=[['torch','火把'],['food','浆果'],['grass','草方块'],['dirt','泥土'],['stone','石头'],['plank','木板'],['wood','原木'],['shard','灵魂碎片']];
+  const order=[['torch','火把'],['food','浆果'],['herb','安神草药'],['grass','草方块'],['dirt','泥土'],['stone','石头'],['plank','木板'],['wood','原木'],['shard','灵魂碎片']];
   order.forEach(([id,name])=>{ const c=(id==='shard')?shardsGot:(inv[id]||0); const s=document.createElement('div'); s.className='bslot'+(c<=0?' zero':'');
     const cv=document.createElement('canvas'); cv.width=cv.height=48; drawItemIcon(cv,id); s.appendChild(cv);
     const bn=document.createElement('div'); bn.className='bn'; bn.textContent=name; s.appendChild(bn);
@@ -737,7 +815,7 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.
   if(e.key==='Tab'||k==='b'){ e.preventDefault(); toggleBag(); return; }
   if(bagOpen){ if(e.key==='Escape')toggleBag(); return; }
   if(!pointerLocked)return;
-  if(k==='r')placeTorch(); if(k==='e')doInteract(); if(k==='q')eat(); if(k>='1'&&k<='5')setSel(parseInt(k)-1); });
+  if(k==='r')placeTorch(); if(k==='e')doInteract(); if(k==='q')eat(); if(k==='g')useHerb(); if(k==='f'&&altarChoice)resolveAltar('sacrifice'); if(k>='1'&&k<='5')setSel(parseInt(k)-1); });
 addEventListener('keyup',e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(e.key===' ')keys[' ']=false; });
 addEventListener('wheel',e=>{ if(!pointerLocked)return; setSel(selBlock+(e.deltaY>0?1:-1)); },{passive:true});
 addEventListener('mousemove',e=>{ if(!pointerLocked)return;
@@ -754,9 +832,10 @@ function lockPointer(){ const el=renderer.domElement;
     if(p&&p.catch) p.catch(()=>{ try{ el.requestPointerLock(); }catch(_){} });   // 不支持则回退普通锁定
   }catch(e){ try{ el.requestPointerLock(); }catch(_){} } }
 
-document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); lockPointer(); document.getElementById('lockHint').style.display='block'; };
+document.getElementById('playBtn').onclick=()=>{ document.getElementById('start').style.display='none'; started=true; sfx.startAmbient(); startQuest(); lockPointer(); document.getElementById('lockHint').style.display='block'; };
 document.getElementById('respawnBtn').onclick=()=>reset();
 document.getElementById('winBtn').onclick=()=>reset();
+document.getElementById('endBtn').onclick=()=>reset();
 
 if(THREE_OK) init();
 else document.getElementById('start').innerHTML='<h1 style="color:#a33">加载失败</h1><p style="color:#888">无法加载 three.min.js。确认它和 index.html 在同一文件夹。</p>';
