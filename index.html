@@ -24,12 +24,13 @@
 
   /* 左下 状态条 */
   .barWrap { position:absolute; left:24px; width:220px; }
-  #sanityWrap { bottom:52px; } #hungerWrap { bottom:24px; }
+  #sanityWrap { bottom:80px; } #hungerWrap { bottom:50px; } #noiseWrap { bottom:20px; }
   .barLabel { color:#8a8f7a; font-size:11px; letter-spacing:3px; margin-bottom:4px; text-shadow:0 0 4px #000; }
   .bar { height:13px; background:rgba(0,0,0,.6); border:1px solid #3a3f33; }
-  .barFill { height:100%; width:100%; transition:width .25s, background .4s; }
+  .barFill { height:100%; width:100%; transition:width .15s, background .4s; }
   #sanityFill { background:linear-gradient(90deg,#6b8e23,#3a4a14); }
   #hungerFill { background:linear-gradient(90deg,#c98a3a,#5a3a14); }
+  #noiseFill { width:0%; background:linear-gradient(90deg,#c0392b,#7a1c1c); }
 
   #status { position:absolute; right:24px; bottom:24px; text-align:right; color:#cdd1bf; text-shadow:0 0 6px #000; }
   #status .row { font-size:15px; letter-spacing:2px; margin-bottom:5px; }
@@ -110,7 +111,8 @@
     <span class="o">火把</span>能逼退它、照亮路；<span class="r">食物</span>填饱肚子（饿了会降速、掉理智）。<br><br>
     <b>WASD</b> 移动 · <b>鼠标</b> 视角 · <b>空格</b> 跳 · <b>Shift</b> 疾跑<br>
     <b>左键长按</b> 挖方块(进背包) · <b>右键</b> 放方块(消耗) · <b>R</b> 插火把 · <b>E</b> 互动 · <b>Q</b> 吃东西<br>
-    <b>1-5/滚轮</b> 选方块 · <b>Tab / B</b> 打开背包(暂停)
+    <b>1-5/滚轮</b> 选方块 · <b>Tab / B</b> 打开背包(暂停)<br>
+    <span style="color:#c98a3a">疾跑/挖掘会发出声响引它靠近；潜行(慢走)能甩开它。用方块堆 ≥2 格高的墙挡住它。</span>
   </div>
   <div id="playBtn">进 入 长 夜</div>
   <small>建议戴耳机 · 音量调小</small>
@@ -140,6 +142,7 @@
   <canvas id="heldTorch" width="120" height="200"></canvas>
   <div id="sanityWrap" class="barWrap"><div class="barLabel">SANITY · 理智</div><div class="bar"><div id="sanityFill" class="barFill"></div></div></div>
   <div id="hungerWrap" class="barWrap"><div class="barLabel">HUNGER · 饱食</div><div class="bar"><div id="hungerFill" class="barFill"></div></div></div>
+  <div id="noiseWrap" class="barWrap"><div class="barLabel">NOISE · 声响（越响它越快）</div><div class="bar"><div id="noiseFill" class="barFill"></div></div></div>
   <div id="status">
     <div class="row"><span id="shardIcon">◆</span> 碎片 <span id="shardCount">0 / 4</span></div>
     <div class="row"><span id="torchIcon">♨</span> 火把 <span id="torchCount">10</span></div>
@@ -201,6 +204,9 @@ const placedTorches=[];
 // 统一背包：火把/食物 + 5 种方块（方块成为资源：挖到才有，放置消耗）
 const inv={torch:10, food:3, grass:0, dirt:0, stone:0, plank:0, wood:0};
 let bagOpen=false;
+// Phase 2：声响吸引 + 幻觉
+let noiseLevel=0, lurePos=null, lureTimer=0;
+const phantoms=[]; let hallT=6;
 let chests=[], steles=[], foods=[], villages=[];
 let storiesRead=0;
 
@@ -236,6 +242,14 @@ function genWorld(){
   }
 }
 function groundHeight(x,z){ const xi=Math.floor(x),zi=Math.floor(z); for(let y=WORLD.maxY+6;y>=0;y--) if(voxels.has(kkey(xi,y,zi))) return y+1; return 1; }
+// 声响：行动越吵越吸引实体；安静则甩开它
+function addNoise(v){ noiseLevel=Math.min(1,noiseLevel+v); if(noiseLevel>0.45){ lurePos=player.pos.clone(); lureTimer=7; } }
+// 路障：实体能否站到目标格（≥2 格高的墙挡得住，1 格可跨）
+function entityCanStand(nx,nz,curY){ const gh=groundHeight(nx,nz); if(gh-curY>1.2) return false; if(voxels.has(kkey(Math.floor(nx),gh,Math.floor(nz)))||voxels.has(kkey(Math.floor(nx),gh+1,Math.floor(nz)))) return false; return gh; }
+function tryMoveEntity(nx,nz,curY){ let r=entityCanStand(nx,nz,curY); if(r!==false){entity.position.set(nx,r,nz);return true;}
+  r=entityCanStand(nx,entity.position.z,curY); if(r!==false){entity.position.set(nx,r,entity.position.z);return true;}
+  r=entityCanStand(entity.position.x,nz,curY); if(r!==false){entity.position.set(entity.position.x,r,nz);return true;}
+  return false; }
 
 function flatten(cx,cz,rad,topY){
   for(let x=cx-rad;x<=cx+rad;x++)for(let z=cz-rad;z<=cz+rad;z++){
@@ -307,9 +321,9 @@ function updateDig(dt){
     if(!crackTexCache[si]) crackTexCache[si]=makeCrackTex(Math.min(0.99,digProgress));
     crackMesh.material.map=crackTexCache[si]; crackMesh.material.needsUpdate=true;
     crackMesh.position.set(r.hit[0]+0.5,r.hit[1]+0.5,r.hit[2]+0.5); crackMesh.visible=true;
-    if(Math.random()<0.4) sfx.dig();
+    if(Math.random()<0.4) sfx.dig(); addNoise(dt*0.5);
     document.getElementById('digWrap').style.display='block'; document.getElementById('digFill').style.width=(digProgress*100)+'%';
-    if(digProgress>=1){ const drop=(id==='cobble')?'stone':(inv.hasOwnProperty(id)&&id!=='torch'&&id!=='food'?id:null); if(drop){ inv[drop]++; updateHUD(); refreshHotbar(); } voxels.delete(k); buildMeshes(); sfx.break(); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
+    if(digProgress>=1){ const drop=(id==='cobble')?'stone':(inv.hasOwnProperty(id)&&id!=='torch'&&id!=='food'?id:null); if(drop){ inv[drop]++; updateHUD(); refreshHotbar(); } voxels.delete(k); buildMeshes(); sfx.break(); addNoise(0.5); digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; jolt(0.05); }
   } else { digTarget=null; digProgress=0; crackMesh.visible=false; document.getElementById('digWrap').style.display='none'; }
 }
 function placeBlock(){
@@ -319,7 +333,7 @@ function placeBlock(){
   const p=[r.hit[0]+r.face[0],r.hit[1]+r.face[1],r.hit[2]+r.face[2]]; if(voxels.has(kkey(...p)))return;
   const fx=Math.floor(player.pos.x),fz=Math.floor(player.pos.z),fy=Math.floor(player.pos.y);
   if(p[0]===fx&&p[2]===fz&&(p[1]===fy||p[1]===fy+1))return;
-  voxels.set(kkey(...p),id); inv[id]--; buildMeshes(); sfx.place(); refreshHotbar();
+  voxels.set(kkey(...p),id); inv[id]--; buildMeshes(); sfx.place(); refreshHotbar(); addNoise(0.22);
 }
 
 // ---------- 火把 ----------
@@ -333,7 +347,7 @@ function placeTorch(){
   const L=new THREE.PointLight(0xffae42,2.6,9,1.3); L.position.y=0.7; g.add(L);
   g.position.set(p[0]+0.5,p[1],p[2]+0.5); scene.add(g);
   placedTorches.push({pos:new THREE.Vector3(p[0]+0.5,p[1]+0.7,p[2]+0.5),light:L,flame,group:g});
-  inv.torch--; updateHUD(); refreshHotbar(); sfx.place();
+  inv.torch--; updateHUD(); refreshHotbar(); sfx.place(); addNoise(0.18);
 }
 const TORCH_RADIUS=4.6;
 function inTorchLight(v){ for(const t of placedTorches){ if(t.pos.distanceTo(v)<TORCH_RADIUS)return true; } return false; }
@@ -392,6 +406,24 @@ function buildEntity(){ const g=new THREE.Group(); const skin=new THREE.MeshLamb
 function spawnEntity(){ const ang=Math.random()*Math.PI*2,r=17+Math.random()*7; const ex=player.pos.x+Math.cos(ang)*r,ez=player.pos.z+Math.sin(ang)*r; entity.position.set(ex,groundHeight(ex,ez),ez); entity.visible=true; entityState.active=true; entityState.anger=0.4; }
 function lookingAtEntity(){ if(!entity.visible)return false; const cam=camera.getWorldPosition(new THREE.Vector3()); const toE=entity.position.clone().add(new THREE.Vector3(0,1.4,0)).sub(cam); const dist=toE.length(); toE.normalize(); const dir=camera.getWorldDirection(new THREE.Vector3()); if(dir.dot(toE)<0.55)return false; const steps=Math.min(40,Math.floor(dist)); for(let i=2;i<steps;i++){ const p=cam.clone().add(dir.clone().multiplyScalar(i*(dist/steps))); if(voxels.has(kkey(Math.floor(p.x),Math.floor(p.y),Math.floor(p.z))))return false; } return true; }
 
+// ---------- 幻觉系统（低理智）：视野边缘的假人影，一看就消失 ----------
+function buildPhantom(){ const g=new THREE.Group(); const skin=new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0});
+  const box=(w,h,d,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),skin);m.position.set(x,y,z);g.add(m);};
+  box(0.55,0.55,0.55,0,1.78,0); box(0.55,0.75,0.28,0,1.15,0); box(0.22,0.75,0.22,-0.38,1.15,0); box(0.22,0.75,0.22,0.38,1.15,0); box(0.24,0.75,0.24,-0.16,0.40,0); box(0.24,0.75,0.24,0.16,0.40,0);
+  const em=new THREE.MeshBasicMaterial({color:0xbfeecf,transparent:true,opacity:0}); const e1=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.08,0.05),em); e1.position.set(-0.13,1.82,0.28); g.add(e1); const e2=e1.clone(); e2.position.x=0.13; g.add(e2);
+  g.visible=false; g.userData={skin,em,life:0,maxLife:1}; scene.add(g); return g; }
+function spawnPhantom(){ const ph=phantoms.find(p=>!p.visible); if(!ph)return; const a=Math.random()*Math.PI*2, r=6+Math.random()*6; const x=player.pos.x+Math.cos(a)*r,z=player.pos.z+Math.sin(a)*r; ph.position.set(x,groundHeight(x,z),z); ph.visible=true; ph.userData.life=ph.userData.maxLife=2+Math.random()*2.5; if(Math.random()<0.6)sfx.entWhisper(ph.position); }
+function updateHallucination(dt){
+  if(sanity<42){ hallT-=dt; if(hallT<=0){ hallT=3+Math.random()*5; spawnPhantom(); } }
+  const cam=camera.getWorldPosition(new THREE.Vector3()), dir=camera.getWorldDirection(new THREE.Vector3());
+  for(const ph of phantoms){ if(!ph.visible)continue; ph.lookAt(player.pos.x,ph.position.y+1.4,player.pos.z);
+    const toP=ph.position.clone().add(new THREE.Vector3(0,1.4,0)).sub(cam).normalize();
+    const looked = dir.dot(toP)>0.92;   // 视线对准 → 它"不存在"了
+    ph.userData.life-=dt;
+    if(looked || ph.userData.life<=0){ ph.visible=false; ph.userData.skin.opacity=0; ph.userData.em.opacity=0; if(looked)sfx.teleport(); continue; }
+    const o=THREE.MathUtils.clamp(ph.userData.life/ph.userData.maxLife,0,1)*0.55; ph.userData.skin.opacity=o; ph.userData.em.opacity=o+0.2; }
+}
+
 // ============================================================
 function collide(){
   const r=player.radius,h=player.height;
@@ -414,7 +446,7 @@ function update(dt){
   let move=new THREE.Vector3();
   if(keys['w'])move.add(fwd); if(keys['s'])move.sub(fwd); if(keys['d'])move.add(right); if(keys['a'])move.sub(right);
   const moving=move.lengthSq()>0;
-  if(moving){ move.normalize().multiplyScalar(sp*dt); stepTimer-=dt*(canSprint?1.6:1); if(stepTimer<=0){sfx.step();stepTimer=0.42;} bob+=dt*(canSprint?14:9); }
+  if(moving){ move.normalize().multiplyScalar(sp*dt); stepTimer-=dt*(canSprint?1.6:1); if(stepTimer<=0){sfx.step();stepTimer=0.42;} bob+=dt*(canSprint?14:9); addNoise(dt*(canSprint?0.9:0.16)); }
   player.vel.x=move.x; player.vel.z=move.z;
   // 竖直：帧率无关
   player.vy-=G*dt; if(player.vy<-55)player.vy=-55;
@@ -441,6 +473,10 @@ function update(dt){
   const hv = Math.max(ep, sp2*0.8);
   heartT-=dt; if(hv>0.06 && heartT<=0){ sfx.heartbeat(hv); heartT=1.0-hv*0.55; }           // 心跳：越近/越疯越快
   ambT-=dt; if(ambT<=0){ ambT=8+Math.random()*12; const a=Math.random()*6.28,r=10+Math.random()*14; const p=new THREE.Vector3(player.pos.x+Math.cos(a)*r,player.pos.y+Math.random()*3,player.pos.z+Math.sin(a)*r); if(Math.random()<0.5)sfx.creak(p); else sfx.cry(p); } // 远处木头吱嘎/哭声
+  // 声响衰减 + 诱饵计时 + 幻觉
+  noiseLevel=Math.max(0,noiseLevel-dt*0.5); if(lureTimer>0)lureTimer-=dt;
+  document.getElementById('noiseFill').style.width=(noiseLevel*100)+'%';
+  updateHallucination(dt);
 }
 
 let scareCooldown=0, heartT=0, ambT=6;
@@ -462,9 +498,15 @@ function updateEntity(dt){
   if(lit){ toP.normalize(); const ex=entity.position.x-toP.x*1.4*dt*3,ez=entity.position.z-toP.z*1.4*dt*3; entity.position.set(ex,groundHeight(ex,ez),ez); entityState.anger=Math.max(0.2,entityState.anger-dt*0.1); entityState.seen=0; }
   else if(looking){ entityState.anger=Math.min(1,entityState.anger+dt*0.05); entityState.seen=(entityState.seen||0)+dt;
     if(entityState.seen>3.2 && dist>7 && Math.random()<0.025){ entity.visible=false; entityState.reappear=2+Math.random()*3; entityState.seen=0; } }
-  else { entityState.seen=0; toP.normalize(); const ap=(0.6+entityState.anger*2.2)*dt; let nx=entity.position.x+toP.x*ap,nz=entity.position.z+toP.z*ap; entity.position.set(nx,groundHeight(nx,nz),nz);
+  else { entityState.seen=0;
+    entityState.anger=Math.min(1,entityState.anger+noiseLevel*dt*0.12);            // 越吵越怒
+    const tgt=(noiseLevel<0.12 && lureTimer>0 && dist>9 && lurePos)?lurePos:player.pos; // 安静→去调查上次声响处
+    const dir=new THREE.Vector3(tgt.x-entity.position.x,0,tgt.z-entity.position.z); const dl=dir.length()||1; dir.multiplyScalar(1/dl);
+    const ap=(0.5+entityState.anger*1.8+noiseLevel*1.6)*dt;
+    const moved=tryMoveEntity(entity.position.x+dir.x*ap, entity.position.z+dir.z*ap, entity.position.y); // 被墙挡住会绕/停
     entityState.stepT=(entityState.stepT||0)-dt; if(entityState.stepT<=0){ sfx.entStep(entity.position,0.16+near*0.34); entityState.stepT=Math.max(0.26,0.62-entityState.anger*0.3); }
-    if(Math.random()<0.004+entityState.anger*0.01){ const r=Math.max(5,dist*0.5); const ex=player.pos.x-toP.x*r,ez=player.pos.z-toP.z*r; if(!inTorchLight(new THREE.Vector3(ex,groundHeight(ex,ez)+1,ez))){ entity.position.set(ex,groundHeight(ex,ez),ez); sfx.teleport(); } } }
+    const tp=(moved?0.004:0.05)+entityState.anger*0.01;                            // 被堵住更想瞬移
+    if(Math.random()<tp){ const r=Math.max(5,dist*0.5); const ex=player.pos.x-dir.x*r,ez=player.pos.z-dir.z*r; const gh=groundHeight(ex,ez); if(entityCanStand(ex,ez,gh)!==false && !inTorchLight(new THREE.Vector3(ex,gh+1,ez))){ entity.position.set(ex,gh,ez); sfx.teleport(); } } }
   entityState.nextWhisper-=dt; if(entityState.nextWhisper<=0&&dist<16){ const line=randWhisper(); sfx.entWhisper(entity.position); entityState.nextWhisper=4+Math.random()*6; if(dist<14){ showSubtitle(line); if(Math.random()<0.5)sfx.speak(line.replace(/[…「」]/g,'')); } }
   scareCooldown-=dt; if(dist<1.7&&scareCooldown<=0&&!lit) jumpScare();
 }
@@ -583,7 +625,7 @@ function init(){
   hemi=new THREE.HemisphereLight(0x2a3550,0x0a0c10,0.30); scene.add(hemi);
   moon=new THREE.DirectionalLight(0x6a7aa0,0.22); moon.position.set(-20,40,-10); scene.add(moon);
   torchLight=new THREE.PointLight(0xffae42,2.6,16,1.2); scene.add(torchLight);
-  genWorld(); buildMeshes(); initSelection(); entity=buildEntity(); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
+  genWorld(); buildMeshes(); initSelection(); entity=buildEntity(); for(let i=0;i<2;i++)phantoms.push(buildPhantom()); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
   camera.position.copy(player.pos).add(new THREE.Vector3(0,player.height-0.2,0)); updateHUD(); buildHotbar();
   clock=new THREE.Clock(); animate();
@@ -592,6 +634,7 @@ function reset(){
   sanity=100; hunger=100; alive=true; won=false; survived=0; shardsGot=0; storiesRead=0;
   inv.torch=10; inv.food=3; inv.grass=inv.dirt=inv.stone=inv.plank=inv.wood=0;
   bagOpen=false; document.getElementById('backpack').style.display='none'; document.body.style.cursor='none'; refreshHotbar();
+  noiseLevel=0; lureTimer=0; lurePos=null; hallT=6; phantoms.forEach(p=>{p.visible=false;p.userData.skin.opacity=0;p.userData.em.opacity=0;});
   entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0,seen:0,reappear:0,stepT:0}; entity.visible=false; scareCooldown=0; heartT=0; ambT=6; shakeAmount=0;
   const gl=document.getElementById('glitch'); gl.style.opacity='0'; if(renderer)renderer.domElement.style.filter='none';
   placedTorches.forEach(t=>scene.remove(t.group)); placedTorches.length=0;
