@@ -16,6 +16,8 @@
   #crosshair::after { top:8px; left:0; height:2px; width:18px; }
 
   #vignette { position:absolute; inset:0; box-shadow: inset 0 0 200px 70px rgba(0,0,0,.8); transition:box-shadow .6s; }
+  #glitch { position:absolute; inset:0; opacity:0; mix-blend-mode:screen; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(255,0,46,.16) 0 1px, rgba(0,255,238,.13) 1px 2px, transparent 2px 5px); }
 
   #objective { position:absolute; left:50%; top:18px; transform:translateX(-50%); text-align:center; color:#e7d9a8; font-size:15px; letter-spacing:2px; text-shadow:0 0 8px #000; }
   #objSub { color:#9aa089; font-size:12px; margin-top:4px; letter-spacing:1px; }
@@ -112,6 +114,7 @@
   <div id="crosshair"></div>
   <div id="digWrap"><div id="digFill"></div></div>
   <div id="vignette"></div>
+  <div id="glitch"></div>
   <canvas id="heldTorch" width="120" height="200"></canvas>
   <div id="sanityWrap" class="barWrap"><div class="barLabel">SANITY · 理智</div><div class="bar"><div id="sanityFill" class="barFill"></div></div></div>
   <div id="hungerWrap" class="barWrap"><div class="barLabel">HUNGER · 饱食</div><div class="bar"><div id="hungerFill" class="barFill"></div></div></div>
@@ -173,13 +176,16 @@ let altar=null;
 let torchesLeft=10; const placedTorches=[];
 let foodCount=3;
 let chests=[], steles=[], foods=[], villages=[];
+let storiesRead=0;
 
-const LORE = [
-  '「第七日，太阳没有升起。我们点起所有火把，等天亮。」',
-  '「孩子们先开始说梦话。他们说，林子里站着一个人，一直看着我们。」',
-  '「火把灭一盏，它就近一步。别让黑暗连成片。」',
-  '「村长把我们的魂封进碎片，散入林中。集齐它们，黎明祭坛会再亮一次。」',
-  '「读到这里的人——你还活着。那就别停下，别回头，去点亮祭坛。」',
+// 序章碑（出生点）
+const LORE_PROLOGUE='「第七日，太阳没有升起。我们点起所有火把，等天亮——可火把，是会灭的。」';
+// 4 个村民的悲剧，各自附在一块灵魂碎片旁
+const STORIES = [
+  {name:'磨坊主 · 老格雷', text:'「磨坊主第一个提议：献一个孩子，换太阳回来。\n我们谁都没拦他。\n这碎片是凉的——像他女儿最后攥住我的那只手。」'},
+  {name:'铁匠之妻 · 莉娜',  text:'「我男人去林子里重封那东西，再没回来。\n那夜它用他的嗓子在门外喊我开门，喊了一整宿。\n我把门钉死了。我没开。我到现在都听得见。」'},
+  {name:'牧师 · 班',        text:'「封印要七个真名。我只凑齐六个。\n第七个，我打算写自己的——可手抖了。\n对不起。我写成了你的名字。」'},
+  {name:'孩子 · 萨米',      text:'「大人们说，别看它。\n可它一直冲我笑，说等所有火把都灭了，\n我们就能永远一起玩了。我好困……」'},
 ];
 
 // ---------- 世界生成 ----------
@@ -305,32 +311,56 @@ const TORCH_RADIUS=4.6;
 function inTorchLight(v){ for(const t of placedTorches){ if(t.pos.distanceTo(v)<TORCH_RADIUS)return true; } return false; }
 
 // ============================================================
-const sfx=(()=>{ let ctx,master,drone,droneGain;
-  function ensure(){ if(!ctx){ctx=new (window.AudioContext||window.webkitAudioContext)();master=ctx.createGain();master.gain.value=0.7;master.connect(ctx.destination);} }
-  function startAmbient(){ ensure(); drone=ctx.createOscillator();drone.type='sawtooth';drone.frequency.value=42; const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=120; droneGain=ctx.createGain();droneGain.gain.value=0.05; const lfo=ctx.createOscillator();lfo.frequency.value=0.07;const lg=ctx.createGain();lg.gain.value=8;lfo.connect(lg);lg.connect(drone.frequency); drone.connect(lp);lp.connect(droneGain);droneGain.connect(master);drone.start();lfo.start(); }
-  function tone(f,d,type='sine',v=0.3,gl){ ensure();const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.value=f;if(gl)o.frequency.exponentialRampToValueAtTime(gl,ctx.currentTime+d);g.gain.value=v;g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d);o.connect(g);g.connect(master);o.start();o.stop(ctx.currentTime+d); }
-  function noise(d,v,ff){ ensure();const n=ctx.createBufferSource(),buf=ctx.createBuffer(1,ctx.sampleRate*d,ctx.sampleRate),dt=buf.getChannelData(0);for(let i=0;i<dt.length;i++)dt[i]=Math.random()*2-1;n.buffer=buf;const f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=ff||800;const g=ctx.createGain();g.gain.value=v;g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d);n.connect(f);f.connect(g);g.connect(master);n.start();n.stop(ctx.currentTime+d); }
-  return { ensure,startAmbient,
+const sfx=(()=>{
+  let ctx,master,listener;
+  let windGain,tensionGain,breathGain,breathPan; let loops=false;
+  function ensure(){ if(ctx)return; ctx=new (window.AudioContext||window.webkitAudioContext)(); master=ctx.createGain(); master.gain.value=0.8; master.connect(ctx.destination); listener=ctx.listener; }
+  function noiseBuf(d){ const b=ctx.createBuffer(1,Math.max(1,Math.floor(ctx.sampleRate*d)),ctx.sampleRate); const dt=b.getChannelData(0); for(let i=0;i<dt.length;i++)dt[i]=Math.random()*2-1; return b; }
+  function setPan(p,x,y,z){ if(p.positionX){p.positionX.value=x;p.positionY.value=y;p.positionZ.value=z;} else p.setPosition(x,y,z); }
+  function mkPan(x,y,z){ const p=ctx.createPanner(); p.panningModel='HRTF'; p.distanceModel='inverse'; p.refDistance=2.5; p.maxDistance=45; p.rolloffFactor=1.1; setPan(p,x,y,z); return p; }
+  function tone(f,d,type,v,gl,dest){ ensure(); const o=ctx.createOscillator(),g=ctx.createGain(); o.type=type||'sine'; o.frequency.value=f; if(gl)o.frequency.exponentialRampToValueAtTime(gl,ctx.currentTime+d); g.gain.value=v; g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d); o.connect(g); g.connect(dest||master); o.start(); o.stop(ctx.currentTime+d); }
+  function noise(d,v,ff,dest){ ensure(); const n=ctx.createBufferSource(); n.buffer=noiseBuf(d); const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=ff||800; const g=ctx.createGain(); g.gain.value=v; g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d); n.connect(f); f.connect(g); g.connect(dest||master); n.start(); n.stop(ctx.currentTime+d); }
+  function noiseAt(p,d,v,ff){ ensure(); const pan=mkPan(p.x,p.y,p.z); pan.connect(master); noise(d,v,ff,pan); }
+  function toneAt(p,f,d,type,v,gl){ ensure(); const pan=mkPan(p.x,p.y,p.z); pan.connect(master); tone(f,d,type,v,gl,pan); }
+  function startAmbient(){ ensure(); if(ctx.state==='suspended')ctx.resume(); if(loops)return; loops=true;
+    // 永夜风声（持续，缓慢起伏）
+    const wind=ctx.createBufferSource(); wind.buffer=noiseBuf(4); wind.loop=true; const wf=ctx.createBiquadFilter(); wf.type='lowpass'; wf.frequency.value=420; windGain=ctx.createGain(); windGain.gain.value=0.05; const wl=ctx.createOscillator(); wl.frequency.value=0.05; const wlg=ctx.createGain(); wlg.gain.value=0.028; wl.connect(wlg); wlg.connect(windGain.gain); wind.connect(wf); wf.connect(windGain); windGain.connect(master); wind.start(); wl.start();
+    // 张力低鸣（随实体接近增强；平时为 0）
+    const tn=ctx.createOscillator(); tn.type='sawtooth'; tn.frequency.value=44; const tl=ctx.createBiquadFilter(); tl.type='lowpass'; tl.frequency.value=150; tensionGain=ctx.createGain(); tensionGain.gain.value=0; tn.connect(tl); tl.connect(tensionGain); tensionGain.connect(master); tn.start();
+    // 实体呼吸（位置音，持续；音量随距离由 setBreath 控制）
+    const br=ctx.createBufferSource(); br.buffer=noiseBuf(3); br.loop=true; const bf=ctx.createBiquadFilter(); bf.type='bandpass'; bf.frequency.value=300; bf.Q.value=2.5; breathGain=ctx.createGain(); breathGain.gain.value=0; const bl=ctx.createOscillator(); bl.frequency.value=0.55; const blg=ctx.createGain(); blg.gain.value=0.55; bl.connect(blg); blg.connect(breathGain.gain); breathPan=mkPan(0,0,0); br.connect(bf); bf.connect(breathGain); breathGain.connect(breathPan); breathPan.connect(master); br.start(); bl.start(); }
+  function setListener(cam){ if(!ctx)return; const p=cam.position; const d=cam.getWorldDirection(new THREE.Vector3());
+    if(listener.positionX){ listener.positionX.value=p.x;listener.positionY.value=p.y;listener.positionZ.value=p.z; listener.forwardX.value=d.x;listener.forwardY.value=d.y;listener.forwardZ.value=d.z; listener.upX.value=0;listener.upY.value=1;listener.upZ.value=0; }
+    else { listener.setPosition(p.x,p.y,p.z); listener.setOrientation(d.x,d.y,d.z,0,1,0); } }
+  function setTension(v){ if(tensionGain)tensionGain.gain.setTargetAtTime(Math.min(0.13,v*0.13),ctx.currentTime,0.3); }
+  function setBreath(pos,vol){ if(!breathGain)return; setPan(breathPan,pos.x,pos.y,pos.z); breathGain.gain.setTargetAtTime(vol,ctx.currentTime,0.2); }
+  function duck(){ if(master)master.gain.setTargetAtTime(0.02,ctx.currentTime,0.02); }
+  function unduck(){ if(master)master.gain.setTargetAtTime(0.8,ctx.currentTime,0.5); }
+  let voice=null,vReady=false;
+  function pickVoice(){ try{ const vs=speechSynthesis.getVoices(); voice=vs.find(v=>/zh|chinese/i.test(v.lang+' '+v.name))||null; vReady=true; }catch(e){} }
+  if(typeof speechSynthesis!=='undefined'){ try{ speechSynthesis.onvoiceschanged=pickVoice; pickVoice(); }catch(e){} }
+  function speak(text){ try{ if(typeof speechSynthesis==='undefined')return; if(!vReady)pickVoice(); const u=new SpeechSynthesisUtterance(text); if(voice)u.voice=voice; u.lang='zh-CN'; u.rate=0.7; u.pitch=0.25; u.volume=0.4; speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){} }
+  return { ensure,startAmbient,setListener,setTension,setBreath,duck,unduck,speak,
     dig(){noise(0.10,0.14,360);}, break(){noise(0.22,0.3,420);}, place(){tone(180,0.12,'square',0.18);},
     step(){noise(0.08,0.10,240);}, shard(){tone(700,0.18,'sine',0.25,1200);tone(1050,0.3,'sine',0.18,1500);},
     pickup(){tone(520,0.12,'sine',0.2,760);}, eat(){noise(0.18,0.12,300);tone(240,0.16,'sine',0.12);},
-    chest(){tone(300,0.1,'square',0.18);setTimeout(()=>tone(440,0.16,'square',0.16),90);},
-    lore(){tone(360,0.5,'sine',0.12,300);},
-    whisper(){noise(0.9,0.10,1400);tone(90,0.9,'sine',0.04,70);},
-    heartbeat(v){tone(54,0.16,'sine',0.18*v,40);setTimeout(()=>tone(50,0.2,'sine',0.14*v,36),180);},
-    scare(){ensure();noise(1.4,0.6,1800);tone(1200,1.2,'sawtooth',0.4,140);tone(70,1.4,'square',0.5);},
-    teleport(){tone(300,0.25,'sawtooth',0.12,80);}, die(){tone(140,2.0,'sine',0.4,40);noise(2.0,0.2,500);},
-    win(){tone(523,0.3,'sine',0.3);setTimeout(()=>tone(659,0.3,'sine',0.3),200);setTimeout(()=>tone(784,0.5,'sine',0.3),400);},
+    chest(){tone(300,0.1,'square',0.18);setTimeout(()=>tone(440,0.16,'square',0.16),90);}, lore(){tone(360,0.5,'sine',0.12,300);},
+    entStep(pos,v){ noiseAt(pos,0.12,v||0.3,250); }, entWhisper(pos){ noiseAt(pos,0.9,0.12,1400); toneAt(pos,90,0.9,'sine',0.05,70); },
+    cry(pos){ toneAt(pos,430,1.6,'sine',0.05,300); }, creak(pos){ noiseAt(pos,0.5,0.1,180); },
+    heartbeat(v){ tone(54,0.16,'sine',0.2*v,40); setTimeout(()=>tone(50,0.2,'sine',0.15*v,36),170); },
+    scare(){ ensure(); noise(1.4,0.6,1800); tone(1200,1.2,'sawtooth',0.4,140); tone(70,1.4,'square',0.5); },
+    teleport(){ tone(300,0.25,'sawtooth',0.12,80); }, die(){ tone(140,2.0,'sine',0.4,40); noise(2.0,0.2,500); },
+    win(){ tone(523,0.3,'sine',0.3); setTimeout(()=>tone(659,0.3,'sine',0.3),200); setTimeout(()=>tone(784,0.5,'sine',0.3),400); },
   };
 })();
 
 // ============================================================
 function makeEntityFaceDataURL(){ const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d'); g.fillStyle='#1a1208';g.fillRect(0,0,256,256); for(let i=0;i<6000;i++){g.fillStyle=`rgba(${30+Math.random()*40|0},${20+Math.random()*30|0},10,0.4)`;g.fillRect(Math.random()*256,Math.random()*256,2,2);} g.fillStyle='#eaffea';g.shadowColor='#bfffbf';g.shadowBlur=40;g.fillRect(56,96,48,34);g.fillRect(152,96,48,34); g.shadowBlur=0;g.fillStyle='#000';g.fillRect(86,180,84,10); for(let x=90;x<170;x+=12){g.fillStyle='#3a2a1a';g.fillRect(x,180,4,16);} return c.toDataURL(); }
-function buildEntity(){ const g=new THREE.Group(); const skin=new THREE.MeshLambertMaterial({color:0x191915});
+function buildEntity(){ const g=new THREE.Group(); const skin=new THREE.MeshLambertMaterial({color:0x191915,transparent:true,opacity:0.55});
   const box=(w,h,d,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),skin);m.position.set(x,y,z);g.add(m);return m;};
   box(0.55,0.55,0.55,0,1.78,0); box(0.55,0.75,0.28,0,1.15,0); box(0.22,0.75,0.22,-0.38,1.15,0); box(0.22,0.75,0.22,0.38,1.15,0); box(0.24,0.75,0.24,-0.16,0.40,0); box(0.24,0.75,0.24,0.16,0.40,0);
   const eyeMat=new THREE.MeshBasicMaterial({color:0xeaffea}); const e1=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.08,0.05),eyeMat);e1.position.set(-0.13,1.82,0.28);g.add(e1); const e2=e1.clone();e2.position.x=0.13;g.add(e2);
-  const light=new THREE.PointLight(0x88ff88,0,4);light.position.set(0,1.8,0.3);g.add(light); g.userData.eyeLight=light; g.visible=false; scene.add(g); return g; }
+  const light=new THREE.PointLight(0x88ff88,0,4);light.position.set(0,1.8,0.3);g.add(light); g.userData.eyeLight=light; g.userData.skin=skin; g.visible=false; scene.add(g); return g; }
 function spawnEntity(){ const ang=Math.random()*Math.PI*2,r=17+Math.random()*7; const ex=player.pos.x+Math.cos(ang)*r,ez=player.pos.z+Math.sin(ang)*r; entity.position.set(ex,groundHeight(ex,ez),ez); entity.visible=true; entityState.active=true; entityState.anger=0.4; }
 function lookingAtEntity(){ if(!entity.visible)return false; const cam=camera.getWorldPosition(new THREE.Vector3()); const toE=entity.position.clone().add(new THREE.Vector3(0,1.4,0)).sub(cam); const dist=toE.length(); toE.normalize(); const dir=camera.getWorldDirection(new THREE.Vector3()); if(dir.dot(toE)<0.55)return false; const steps=Math.min(40,Math.floor(dist)); for(let i=2;i<steps;i++){ const p=cam.clone().add(dir.clone().multiplyScalar(i*(dist/steps))); if(voxels.has(kkey(Math.floor(p.x),Math.floor(p.y),Math.floor(p.z))))return false; } return true; }
 
@@ -376,37 +406,62 @@ function update(dt){
   updateDig(dt); updateEntity(dt); updateShards(dt); updateFoods(dt); updateAltar(dt);
   updateHunger(dt,moving,canSprint); updateSanity(dt); updateInteract();
   for(const t of placedTorches){ t.flame.scale.y=0.8+Math.random()*0.5; t.light.intensity=2.3+Math.random()*0.6; }
+  // ---- 音频驱动 ----
+  sfx.setListener(camera);
+  const ep = entityState.active? THREE.MathUtils.clamp(1-(entityState.dist-2)/9,0,1):0;   // 实体接近度
+  const sp2 = sanity<45?(45-sanity)/45:0;                                                  // 低理智度
+  const hv = Math.max(ep, sp2*0.8);
+  heartT-=dt; if(hv>0.06 && heartT<=0){ sfx.heartbeat(hv); heartT=1.0-hv*0.55; }           // 心跳：越近/越疯越快
+  ambT-=dt; if(ambT<=0){ ambT=8+Math.random()*12; const a=Math.random()*6.28,r=10+Math.random()*14; const p=new THREE.Vector3(player.pos.x+Math.cos(a)*r,player.pos.y+Math.random()*3,player.pos.z+Math.sin(a)*r); if(Math.random()<0.5)sfx.creak(p); else sfx.cry(p); } // 远处木头吱嘎/哭声
 }
 
-let scareCooldown=0;
+let scareCooldown=0, heartT=0, ambT=6;
 function updateEntity(dt){
-  if(!entityState.active)return;
-  const looking=lookingAtEntity(); const eyeL=entity.userData.eyeLight;
+  if(!entityState.active){ sfx.setTension(0); sfx.setBreath(player.pos,0); return; }
+  // 隐身/再现：被盯久了它会消失，再从另一个方向回到视野边缘
+  if(!entity.visible){ sfx.setTension(0.18); sfx.setBreath(player.pos,0); entityState.reappear-=dt;
+    if(entityState.reappear<=0){ const ang=Math.random()*Math.PI*2,r=10+Math.random()*6; const ex=player.pos.x+Math.cos(ang)*r,ez=player.pos.z+Math.sin(ang)*r; entity.position.set(ex,groundHeight(ex,ez),ez); entity.visible=true; sfx.teleport(); } else return; }
+  const looking=lookingAtEntity(); const eyeL=entity.userData.eyeLight, skin=entity.userData.skin;
   const toP=player.pos.clone().sub(entity.position); toP.y=0; const dist=toP.length(); entityState.dist=dist;
   entity.lookAt(player.pos.x,entity.position.y+1.4,player.pos.z);
-  eyeL.intensity=THREE.MathUtils.clamp(2.5-dist*0.12,0.1,2.2);
   const lit=inTorchLight(entity.position.clone().add(new THREE.Vector3(0,1,0)));
-  if(lit){ toP.normalize(); const ex=entity.position.x-toP.x*1.4*dt*3,ez=entity.position.z-toP.z*1.4*dt*3; entity.position.set(ex,groundHeight(ex,ez),ez); eyeL.intensity*=0.4; entityState.anger=Math.max(0.2,entityState.anger-dt*0.1); }
-  else if(looking){ entityState.anger=Math.min(1,entityState.anger+dt*0.05); }
-  else { toP.normalize(); const ap=(0.6+entityState.anger*2.2)*dt; let nx=entity.position.x+toP.x*ap,nz=entity.position.z+toP.z*ap; entity.position.set(nx,groundHeight(nx,nz),nz);
+  const near=THREE.MathUtils.clamp(1-(dist-2)/12,0,1);
+  // 只在黑暗里隐约可见：火把照到才清晰，远处暗处只剩淡淡轮廓 + 那双眼
+  skin.opacity = lit?0.92 : THREE.MathUtils.clamp(0.14+(10-dist)*0.05,0.1,0.7);
+  eyeL.intensity = THREE.MathUtils.clamp(2.5-dist*0.12,0.1,2.2)*(lit?0.4:1);
+  sfx.setTension(near*(lit?0.3:1));
+  sfx.setBreath(entity.position.clone().add(new THREE.Vector3(0,1.5,0)), lit?0:near*0.55);
+  if(lit){ toP.normalize(); const ex=entity.position.x-toP.x*1.4*dt*3,ez=entity.position.z-toP.z*1.4*dt*3; entity.position.set(ex,groundHeight(ex,ez),ez); entityState.anger=Math.max(0.2,entityState.anger-dt*0.1); entityState.seen=0; }
+  else if(looking){ entityState.anger=Math.min(1,entityState.anger+dt*0.05); entityState.seen=(entityState.seen||0)+dt;
+    if(entityState.seen>3.2 && dist>7 && Math.random()<0.025){ entity.visible=false; entityState.reappear=2+Math.random()*3; entityState.seen=0; } }
+  else { entityState.seen=0; toP.normalize(); const ap=(0.6+entityState.anger*2.2)*dt; let nx=entity.position.x+toP.x*ap,nz=entity.position.z+toP.z*ap; entity.position.set(nx,groundHeight(nx,nz),nz);
+    entityState.stepT=(entityState.stepT||0)-dt; if(entityState.stepT<=0){ sfx.entStep(entity.position,0.16+near*0.34); entityState.stepT=Math.max(0.26,0.62-entityState.anger*0.3); }
     if(Math.random()<0.004+entityState.anger*0.01){ const r=Math.max(5,dist*0.5); const ex=player.pos.x-toP.x*r,ez=player.pos.z-toP.z*r; if(!inTorchLight(new THREE.Vector3(ex,groundHeight(ex,ez)+1,ez))){ entity.position.set(ex,groundHeight(ex,ez),ez); sfx.teleport(); } } }
-  entityState.heartbeat-=dt; if(dist<10){ const near=THREE.MathUtils.clamp(1-(dist-2)/8,0.1,1); if(entityState.heartbeat<=0){sfx.heartbeat(near);entityState.heartbeat=0.9-near*0.45;} }
-  entityState.nextWhisper-=dt; if(entityState.nextWhisper<=0&&dist<16){ sfx.whisper(); entityState.nextWhisper=4+Math.random()*6; if(dist<14)showSubtitle(randWhisper()); }
+  entityState.nextWhisper-=dt; if(entityState.nextWhisper<=0&&dist<16){ const line=randWhisper(); sfx.entWhisper(entity.position); entityState.nextWhisper=4+Math.random()*6; if(dist<14){ showSubtitle(line); if(Math.random()<0.5)sfx.speak(line.replace(/[…「」]/g,'')); } }
   scareCooldown-=dt; if(dist<1.7&&scareCooldown<=0&&!lit) jumpScare();
 }
-const WHISPERS=['…别回头…','…我看得见你…','…再近一点…','…这里没有早晨…','…你逃不掉…','…把火把放下…','…后面…'];
+const WHISPERS=['…别回头…','…我看得见你…','…我们一起等天亮吧…','…你也醒着吗…','…再近一点…','…这里没有早晨…','…你逃不掉…','…把火把放下…','…陪陪我…','…后面…'];
 const randWhisper=()=>WHISPERS[Math.floor(Math.random()*WHISPERS.length)];
 const ENTITY_FACE=THREE_OK?makeEntityFaceDataURL():'';
-function jumpScare(){ scareCooldown=6; sanity-=32; sfx.scare(); const sc=document.getElementById('scare'); sc.style.transition='none'; sc.style.opacity='1'; document.getElementById('scareFace').src=ENTITY_FACE; shakeAmount=0.9; setTimeout(()=>{sc.style.transition='opacity .9s';sc.style.opacity='0';},520); const away=entity.position.clone().sub(player.pos).setY(0).normalize().multiplyScalar(10); const ex=player.pos.x+away.x,ez=player.pos.z+away.z; entity.position.set(ex,groundHeight(ex,ez),ez); entityState.anger=Math.min(1,entityState.anger+0.25); if(sanity<=0)die(); }
+function jumpScare(){ scareCooldown=6; sanity-=32; sfx.duck(); setTimeout(()=>{sfx.scare();sfx.unduck();},110); const sc=document.getElementById('scare'); sc.style.transition='none'; sc.style.opacity='1'; document.getElementById('scareFace').src=ENTITY_FACE; shakeAmount=0.9; setTimeout(()=>{sc.style.transition='opacity .9s';sc.style.opacity='0';},520); const away=entity.position.clone().sub(player.pos).setY(0).normalize().multiplyScalar(10); const ex=player.pos.x+away.x,ez=player.pos.z+away.z; entity.position.set(ex,groundHeight(ex,ez),ez); entityState.anger=Math.min(1,entityState.anger+0.25); if(sanity<=0)die(); }
 
 // ---------- 碎片（部分藏村庄） ----------
+function makeStele(x,gy,z,text,name){
+  const sg=new THREE.Group();
+  const slab=new THREE.Mesh(new THREE.BoxGeometry(0.7,1.5,0.2),new THREE.MeshLambertMaterial({color:0x6b6e72})); slab.position.y=0.75; sg.add(slab);
+  const base=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.25,0.5),new THREE.MeshLambertMaterial({color:0x55585c})); base.position.y=0.12; sg.add(base);
+  sg.position.set(x,gy,z); scene.add(sg);
+  steles.push({group:sg,pos:new THREE.Vector3(x,gy+0.8,z),text,name,read:false});
+}
 function spawnShards(){
   shards.forEach(s=>scene.remove(s.group)); shards=[]; shardsGot=0;
+  steles.forEach(s=>scene.remove(s.group)); steles=[];
   const cx=WORLD.sx/2, cz=WORLD.sz/2; const spots=[];
   villages.forEach(v=>spots.push([v.cx+ (Math.random()<.5?2:-2), v.cz+(Math.random()<.5?2:-2)])); // 村庄各 1
   let guard=0;
   while(spots.length<SHARD_TOTAL && guard<400){ guard++; const x=4+Math.floor(Math.random()*(WORLD.sx-8)),z=4+Math.floor(Math.random()*(WORLD.sz-8)); if(Math.hypot(x-cx,z-cz)<10)continue; if(spots.some(s=>Math.hypot(s[0]-x,s[1]-z)<8))continue; spots.push([x,z]); }
-  spots.slice(0,SHARD_TOTAL).forEach(([x,z],i)=>{ const y=groundHeight(x,z)+0.8; const g=new THREE.Group(); const core=new THREE.Mesh(new THREE.OctahedronGeometry(0.28),new THREE.MeshBasicMaterial({color:0x7fe7c4})); g.add(core); g.add(new THREE.PointLight(0x7fe7c4,1.6,6,1.5)); g.position.set(x+0.5,y,z+0.5); scene.add(g); shards.push({group:g,core,base:y,i}); });
+  spots.slice(0,SHARD_TOTAL).forEach(([x,z],i)=>{ const gy=groundHeight(x,z); const y=gy+0.8; const g=new THREE.Group(); const core=new THREE.Mesh(new THREE.OctahedronGeometry(0.28),new THREE.MeshBasicMaterial({color:0x7fe7c4})); g.add(core); g.add(new THREE.PointLight(0x7fe7c4,1.6,6,1.5)); g.position.set(x+0.5,y,z+0.5); scene.add(g); shards.push({group:g,core,base:y,i});
+    const st=STORIES[i%STORIES.length]; makeStele(x+1.6,gy,z+0.5,st.text,st.name); }); // 碎片旁的村民故事碑
 }
 function updateShards(dt){ const t=performance.now()*0.001;
   for(let i=shards.length-1;i>=0;i--){ const s=shards[i]; s.core.rotation.y+=dt*2; s.group.position.y=s.base+Math.sin(t*2+i)*0.15;
@@ -427,17 +482,11 @@ function eat(){ if(foodCount<=0){ showSubtitle('没有食物了'); return; } if(
 
 // ---------- 村庄交互物：补给箱 + 石碑 ----------
 function spawnVillageObjects(){
-  chests.forEach(c=>scene.remove(c.group)); steles.forEach(s=>scene.remove(s.group)); chests=[]; steles=[];
-  villages.forEach((v,vi)=>{
-    const gy=v.topY+1;
-    // 补给箱
+  chests.forEach(c=>scene.remove(c.group)); chests=[];   // 石碑由 spawnShards 负责，这里只管补给箱
+  villages.forEach((v)=>{ const gy=v.topY+1;
     const cg=new THREE.Group(); const body=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.6,0.7),new THREE.MeshLambertMaterial({color:0x8a5a2b})); body.position.y=0.3; cg.add(body); const lid=new THREE.Mesh(new THREE.BoxGeometry(0.74,0.12,0.74),new THREE.MeshLambertMaterial({color:0x5a3a1b})); lid.position.y=0.62; cg.add(lid); cg.position.set(v.cx+2.5,gy,v.cz+0.5); scene.add(cg); chests.push({group:cg,lid,pos:new THREE.Vector3(v.cx+2.5,gy+0.4,v.cz+0.5),opened:false});
-    // 石碑
-    const sg=new THREE.Group(); const slab=new THREE.Mesh(new THREE.BoxGeometry(0.7,1.5,0.2),new THREE.MeshLambertMaterial({color:0x6b6e72})); slab.position.y=0.75; sg.add(slab); const base=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.25,0.5),new THREE.MeshLambertMaterial({color:0x55585c})); base.position.y=0.12; sg.add(base); sg.position.set(v.cx-2.5,gy,v.cz-0.5); scene.add(sg); steles.push({group:sg,pos:new THREE.Vector3(v.cx-2.5,gy+0.8,v.cz-0.5),text:LORE[vi%LORE.length],read:false});
   });
-  // 出生点附近也放一块"序章"石碑
-  const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0,gy=groundHeight(sx,sz);
-  const sg=new THREE.Group(); const slab=new THREE.Mesh(new THREE.BoxGeometry(0.7,1.5,0.2),new THREE.MeshLambertMaterial({color:0x6b6e72})); slab.position.y=0.75; sg.add(slab); sg.position.set(sx+2.5,gy,sz+0.5); scene.add(sg); steles.push({group:sg,pos:new THREE.Vector3(sx+2.5,gy+0.8,sz+0.5),text:LORE[0],read:false});
+  const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0,gy=groundHeight(sx,sz); makeStele(sx+2.5,gy,sz+0.5,LORE_PROLOGUE,'序章'); // 出生点序章碑
 }
 function nearestInteractable(){ let best=null,bd=2.8;
   for(const c of chests){ if(c.opened)continue; const d=player.pos.distanceTo(c.pos); if(d<bd){bd=d;best={type:'chest',obj:c};} }
@@ -447,7 +496,7 @@ function updateInteract(){ const it=nearestInteractable(); const el=document.get
   if(it){ el.textContent = it.type==='chest'?'[ E ] 打开补给箱':'[ E ] 阅读石碑'; el.style.opacity='1'; } else el.style.opacity='0'; }
 function doInteract(){ const it=nearestInteractable(); if(!it)return;
   if(it.type==='chest'){ const c=it.obj; c.opened=true; c.lid.rotation.x=-1.1; c.lid.position.z=-0.3; const t=2+Math.floor(Math.random()*3),f=1+Math.floor(Math.random()*2); torchesLeft+=t; foodCount+=f; sfx.chest(); updateHUD(); showSubtitle(`补给：火把 +${t}，食物 +${f}`); }
-  else { showLore(it.obj.text); it.obj.read=true; sfx.lore(); } }
+  else { const s=it.obj; if(!s.read && s.name && s.name!=='序章'){ storiesRead++; showSubtitle(`村民往事 ${storiesRead}/${STORIES.length}`); } showLore((s.name?('— '+s.name+' —\n'):'')+s.text); s.read=true; sfx.lore(); } }
 
 // ---------- 祭坛 ----------
 function buildAltar(){ if(altar) scene.remove(altar.group);
@@ -470,7 +519,11 @@ function updateSanity(dt){ let drain=0;
   if(drain>0)sanity-=drain*dt; else sanity=Math.min(100,sanity+1.0*dt);
   sanity=Math.max(0,Math.min(100,sanity)); if(sanity<=0)die();
   const fill=document.getElementById('sanityFill'); fill.style.width=sanity+'%'; fill.style.background= sanity<30?'linear-gradient(90deg,#7a1c1c,#3a0a0a)':sanity<60?'linear-gradient(90deg,#9a7a23,#4a3a14)':'linear-gradient(90deg,#6b8e23,#3a4a14)';
-  const vig=document.getElementById('vignette'); const it=THREE.MathUtils.clamp((100-sanity)/100,0,1); vig.style.boxShadow=`inset 0 0 ${150-it*30}px ${60+it*120}px rgba(${it>0.6?40:0},0,0,${0.75+it*0.2})`; scene.fog.density=0.030+it*0.04; }
+  const vig=document.getElementById('vignette'); const it=THREE.MathUtils.clamp((100-sanity)/100,0,1); vig.style.boxShadow=`inset 0 0 ${150-it*30}px ${60+it*120}px rgba(${it>0.6?40:0},0,0,${0.75+it*0.2})`; scene.fog.density=0.030+it*0.04;
+  // 低理智失真：偶发扫描线闪 + 持续偏色
+  const gl=document.getElementById('glitch');
+  if(sanity<45 && Math.random()<(45-sanity)/900){ gl.style.opacity=String(0.4+Math.random()*0.5); gl.style.transform='translateX('+((Math.random()-0.5)*16)+'px)'; setTimeout(()=>{gl.style.opacity='0';gl.style.transform='none';},50+Math.random()*90); }
+  renderer.domElement.style.filter = sanity<40 ? `hue-rotate(${((40-sanity)*0.7)|0}deg) saturate(${(1+(40-sanity)/55).toFixed(2)}) contrast(${(1+(40-sanity)/120).toFixed(2)})` : 'none'; }
 
 let shakeAmount=0;
 function applyShake(){ if(shakeAmount>0.001){ camera.position.x+=(Math.random()-0.5)*shakeAmount*0.3; camera.position.y+=(Math.random()-0.5)*shakeAmount*0.3; shakeAmount*=0.85; } }
@@ -481,7 +534,7 @@ function winGame(){ if(won)return; won=true; sfx.win(); document.getElementById(
 // ---------- HUD ----------
 let subTimer=0, loreTimer=0;
 function showSubtitle(t){ const s=document.getElementById('subtitle'); s.textContent=t; s.style.opacity='1'; subTimer=3; }
-function showLore(t){ const l=document.getElementById('lore'); l.textContent=t; l.style.opacity='1'; loreTimer=6; }
+function showLore(t){ const l=document.getElementById('lore'); l.innerHTML=t.replace(/\n/g,'<br>'); l.style.opacity='1'; loreTimer=8; }
 function setObjective(main,sub){ document.getElementById('objective').childNodes[0].nodeValue='目标：'+main; document.getElementById('objSub').textContent=sub||''; }
 function updateHUD(){ document.getElementById('shardCount').textContent=shardsGot+' / '+SHARD_TOTAL; document.getElementById('torchCount').textContent=torchesLeft; document.getElementById('foodCount').textContent=foodCount; }
 
@@ -508,8 +561,9 @@ function init(){
   clock=new THREE.Clock(); animate();
 }
 function reset(){
-  sanity=100; hunger=100; alive=true; won=false; survived=0; shardsGot=0; torchesLeft=10; foodCount=3;
-  entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0}; entity.visible=false; scareCooldown=0; shakeAmount=0;
+  sanity=100; hunger=100; alive=true; won=false; survived=0; shardsGot=0; torchesLeft=10; foodCount=3; storiesRead=0;
+  entityState={active:false,dist:999,anger:0,nextWhisper:3,heartbeat:0,seen:0,reappear:0,stepT:0}; entity.visible=false; scareCooldown=0; heartT=0; ambT=6; shakeAmount=0;
+  const gl=document.getElementById('glitch'); gl.style.opacity='0'; if(renderer)renderer.domElement.style.filter='none';
   placedTorches.forEach(t=>scene.remove(t.group)); placedTorches.length=0;
   genWorld(); buildMeshes(); spawnShards(); spawnFoods(); spawnVillageObjects(); buildAltar();
   const sx=WORLD.sx/2|0,sz=WORLD.sz/2|0; player.pos.set(sx+0.5,groundHeight(sx,sz)+0.2,sz+0.5); player.vel.set(0,0,0); player.vy=0; yaw=0; pitch=0;
