@@ -68,7 +68,6 @@
   #bagClose:active { background:rgba(107,142,35,.3); }
   body.touch #bagClose { display:block; }
 
-  #heldTorch { position:absolute; right:38px; bottom:78px; width:120px; height:200px; }
 
   #digWrap { position:absolute; left:50%; top:calc(50% + 28px); transform:translateX(-50%); width:90px; height:8px; background:rgba(0,0,0,.5); border:1px solid #555; display:none; }
   #digFill { height:100%; width:0%; background:#cdd1bf; }
@@ -79,7 +78,8 @@
   #lore { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); max-width:620px; color:#d8cfa6; font-size:19px; line-height:1.8; letter-spacing:1px; text-align:center; text-shadow:0 0 12px #000; opacity:0; transition:opacity .8s; font-style:italic; background:rgba(0,0,0,.55); padding:34px 40px; border:1px solid rgba(160,140,80,.25); }
 
   #scare { position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; display:flex; align-items:center; justify-content:center; }
-  #scareFace { width:min(70vw,520px); image-rendering:pixelated; filter:drop-shadow(0 0 40px rgba(150,0,0,.8)); }
+  #scareFace { width:min(78vw,560px); filter:drop-shadow(0 0 50px rgba(120,0,0,.7)); animation:scarePunch .5s ease-out; }
+  @keyframes scarePunch { 0%{transform:scale(.72)} 55%{transform:scale(1.12)} 100%{transform:scale(1.0)} }
   #lockHint { display:none; position:absolute; left:50%; top:50%; transform:translate(-50%,40px); color:#e7d9a8; font-size:14px; letter-spacing:2px; text-shadow:0 0 8px #000; text-align:center; }
 
   .overlay { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; cursor:default; padding:20px; }
@@ -173,7 +173,6 @@
   <div id="digWrap"><div id="digFill"></div></div>
   <div id="vignette"></div>
   <div id="glitch"></div>
-  <canvas id="heldTorch" width="120" height="200"></canvas>
   <div id="sanityWrap" class="barWrap"><div class="barLabel">SANITY · 理智</div><div class="bar"><div id="sanityFill" class="barFill"></div></div></div>
   <div id="torchWrap" class="barWrap"><div class="barLabel">TORCH · 手中火把</div><div class="bar"><div id="torchFill" class="barFill"></div></div></div>
   <div id="noiseWrap" class="barWrap"><div class="barLabel">NOISE · 声响</div><div class="bar"><div id="noiseFill" class="barFill"></div></div></div>
@@ -1040,14 +1039,40 @@ function showLore(t){ const l=document.getElementById('lore'); l.innerHTML=t.rep
 function setObjective(main,sub){ document.getElementById('objective').childNodes[0].nodeValue='目标：'+main; document.getElementById('objSub').textContent=sub||''; }
 function updateHUD(){ document.getElementById('shardCount').textContent=storiesRead+' / 5'; }
 
-const htCanvas=document.getElementById('heldTorch'), htCtx=htCanvas&&htCanvas.getContext('2d');
-function drawHeldTorch(){ if(!htCtx)return; const W=120; htCtx.clearRect(0,0,W,200);
-  if(!handTorch.lit)return;   // 没点燃：手是空的
-  const sway=Math.sin(performance.now()*0.003)*4+((keys['w']||keys['a']||keys['s']||keys['d'])?Math.sin(bob)*3:0); const bx=70+sway;
-  htCtx.fillStyle='#6b4a26'; htCtx.fillRect(bx,70,14,130); htCtx.fillStyle='#7d5a30'; htCtx.fillRect(bx+10,70,4,130);
-  const t=performance.now()*0.01, cx=bx+7;
-  for(let i=0;i<22;i++){ const fy=64-i*2.6, w=(1-i/22)*22*(0.8+Math.sin(t+i*0.5)*0.2); htCtx.fillStyle=`rgba(255,${Math.max(60,200-i*7)},${Math.max(0,60-i*4)},${0.9-i*0.03})`; htCtx.fillRect(cx-w/2+Math.sin(t*1.3+i)*2,fy,w,4); }
-  const grd=htCtx.createRadialGradient(cx,40,2,cx,40,60); grd.addColorStop(0,'rgba(255,180,80,.5)'); grd.addColorStop(1,'rgba(255,180,80,0)'); htCtx.fillStyle=grd; htCtx.fillRect(0,0,W,120); }
+// ---------- 第一人称手持火把（挂在相机上的 3D 模型，MC 风格）----------
+let heldTorch3D=null;
+function buildHeldTorch3D(){
+  const g=new THREE.Group();
+  // 木杆：用真实木头材质（Basic 材质保证黑暗里也看得见自己手里的火把）
+  const stickMat=new THREE.MeshBasicMaterial({map:TEX.wood,color:0x77604a});
+  const stick=new THREE.Mesh(new THREE.BoxGeometry(0.09,0.55,0.09),stickMat); g.add(stick);
+  // 顶端炭头 + 火焰核心
+  const ember=new THREE.Mesh(new THREE.BoxGeometry(0.11,0.10,0.11),new THREE.MeshBasicMaterial({color:0xff8c30}));
+  ember.position.y=0.32; g.add(ember);
+  const core=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.09,0.07),new THREE.MeshBasicMaterial({color:0xffd070}));
+  core.position.y=0.40; g.add(core);
+  // 光晕火焰
+  const flame=new THREE.Sprite(new THREE.SpriteMaterial({map:getGlowTex(),color:0xffc060,transparent:true,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending}));
+  flame.scale.set(0.8,0.8,1); flame.position.y=0.42; g.add(flame);
+  g.userData={ember,core,flame};
+  g.position.set(0.42,-0.46,-0.85); g.rotation.set(0.15,0,0.12);
+  g.visible=false; camera.add(g); heldTorch3D=g; return g;
+}
+function drawHeldTorch(){ if(!heldTorch3D)return;
+  heldTorch3D.visible=handTorch.lit;
+  if(!handTorch.lit)return;
+  const t=performance.now()*0.001;
+  const moving=keys['w']||keys['a']||keys['s']||keys['d']||joyVec.x||joyVec.z;
+  // 走路摆动 + 呼吸浮动
+  heldTorch3D.position.x=0.42+(moving?Math.sin(bob)*0.02:0);
+  heldTorch3D.position.y=-0.46+(moving?Math.abs(Math.cos(bob))*0.03:Math.sin(t*1.4)*0.008);
+  heldTorch3D.rotation.z=0.12+(moving?Math.sin(bob)*0.04:Math.sin(t*1.1)*0.015);
+  const fade=Math.max(0.35,Math.min(1,handTorch.life/15));
+  const u=heldTorch3D.userData, fl=0.85+Math.random()*0.3;
+  u.flame.scale.set(0.8*fl*fade,0.8*fl*fade,1);
+  u.core.scale.y=(0.8+Math.random()*0.5)*fade;
+  u.ember.material.color.setHSL(0.07,1,0.35+0.2*fade*fl);
+}
 
 // ============================================================
 let worldSeed=(Math.random()*1e9)|0;
@@ -1061,6 +1086,7 @@ function init(){
   hemi=new THREE.HemisphereLight(0x2a3550,0x0a0c10,0.30); scene.add(hemi);
   moon=new THREE.DirectionalLight(0x6a7aa0,0.22); moon.position.set(-20,40,-10); scene.add(moon);
   torchLight=new THREE.PointLight(0xffae42,0.32,16,1.2); scene.add(torchLight);
+  scene.add(camera); buildHeldTorch3D();
   genWorld(worldSeed); buildAllMeshes(); initSelection(); entity=buildEntity(); buildMate(); for(let i=0;i<2;i++)phantoms.push(buildPhantom());
   spawnStoryObjects(); spawnHerbs(); spawnVillageObjects();
   hotbar[0]={id:'torch',n:4};
